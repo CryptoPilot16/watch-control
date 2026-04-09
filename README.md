@@ -2,10 +2,10 @@
 
 > Approve [Codex](https://github.com/openai/codex) and [Claude Code](https://github.com/anthropics/claude-code) commands from your Apple Watch.
 
-[![Live](https://img.shields.io/badge/live-watch--control.clawnux.com-4ade80?style=flat-square)](https://watch-control.clawnux.com)
+[![Live](https://img.shields.io/badge/live-cryptopilot.dev%2Fwatchcontrol-4ade80?style=flat-square)](https://cryptopilot.dev/watchcontrol)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-![watch-control landing page](assets/screenshot.png)
+![watch-control landing page](assets/preview.png)
 
 Your AI agent runs on a remote Linux server inside `tmux`. When it needs approval, a watcher script detects the prompt, auto-identifies whether it's Codex or Claude Code, and sends a push notification via [Pushover](https://pushover.net). A single tap on your Apple Watch fires a GET request to a local webhook, which injects the correct keystroke — `y` for Codex, `1` for Claude Code — and your agent continues.
 
@@ -112,7 +112,7 @@ The webhook listens on `127.0.0.1` only and is exposed exclusively over your Tai
 
 ## Landing page
 
-Live at [watch-control.clawnux.com](https://watch-control.clawnux.com)
+Live at [cryptopilot.dev/watchcontrol](https://cryptopilot.dev/watchcontrol)
 
 ```bash
 cd web
