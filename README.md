@@ -48,7 +48,7 @@ watch-control/
 **Prerequisites:** Linux server with tmux + Python 3, [Pushover](https://pushover.net) account, [Tailscale](https://tailscale.com) installed, Apple Watch with Shortcuts app.
 
 ```bash
-git clone https://github.com/CryptoPilot16/codex-control.git watch-control
+git clone https://github.com/CryptoPilot16/watch-control.git watch-control
 cd watch-control
 cp .env.example .env
 # edit .env — fill in APPROVE_SECRET, PUSHOVER_APP_TOKEN, PUSHOVER_USER_KEY, APPROVE_PORT
