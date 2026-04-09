@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --text-primary: #e0e0e0;
+  --text-secondary: #888888;
+  --accent: #dc2626;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+::selection {
+  background-color: rgba(220, 38, 38, 0.3);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333333;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+@layer components {
+  .code-block {
+    @apply font-mono text-sm bg-bg-secondary border border-border-subtle rounded-lg p-4 overflow-x-auto;
+    color: #e0e0e0;
+  }
+
+  .code-block code {
+    @apply font-mono;
+  }
+
+  .code-block .comment {
+    color: #555555;
+  }
+
+  .code-block .command {
+    color: #ef4444;
+  }
+
+  .section-heading {
+    @apply font-mono text-2xl sm:text-3xl font-bold text-text-primary;
+  }
+
+  .section-subheading {
+    @apply text-text-secondary text-base sm:text-lg mt-2;
+  }
+}

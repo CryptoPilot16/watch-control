@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+*.log
+web/node_modules/
+web/.next/
+web/out/
