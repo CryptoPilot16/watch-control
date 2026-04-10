@@ -5,3 +5,12 @@ __pycache__/
 web/node_modules/
 web/.next/
 web/out/
+
+# macOS
+.DS_Store
+
+# Xcode
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/**/DerivedData/
+ios/**/build/

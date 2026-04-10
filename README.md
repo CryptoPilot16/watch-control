@@ -59,6 +59,8 @@ watch-control/
 ├── bridge/                   # Node.js bridge server for Apple Watch app
 │   ├── server.js             # SSE bridge — handles pairing, hooks, watch responses
 │   └── package.json
+├── ios/                      # Native watchOS + iOS Xcode project
+│   └── ClaudeWatch/          # SwiftUI app — pairs with bridge, shows approvals
 ├── .env.example              # Environment variable template
 └── web/                      # Landing page source (Next.js, static export)
 ```
@@ -91,14 +93,18 @@ The bridge prints a 6-digit pairing code at startup. Enter your Tailscale IP and
 
 A native watchOS companion app connects to your bridge over Tailscale and shows approval requests on your wrist with one-tap Approve/Deny.
 
-Repo: [github.com/CryptoPilot16/claude-watch](https://github.com/CryptoPilot16/claude-watch)
+Source lives in [`ios/`](ios/) — open `ios/ClaudeWatch/ClaudeWatch.xcodeproj` in Xcode.
 
 **Setup:**
-1. Build and sideload the watchOS app via Xcode (requires Apple Developer account, $99/yr)
-2. Install Tailscale on your Apple Watch / paired iPhone — same tailnet as your VPS
-3. Open the app, enter your VPS Tailscale IP (e.g. `100.x.x.x`)
-4. Enter the 6-digit pairing code shown by the bridge server
-5. Done — approvals will appear on your wrist
+1. Open the Xcode project on a Mac (requires Apple Developer account, $99/yr to sideload)
+2. Set your signing team in **ClaudeWatch iOS** and **ClaudeWatch watchOS** targets
+3. Install Tailscale on your Apple Watch / paired iPhone — same tailnet as your VPS
+4. Build and run on your iPhone — the Watch app deploys alongside the iOS app
+5. Open the app, enter your VPS Tailscale IP (e.g. `100.x.x.x`)
+6. Enter the 6-digit pairing code shown by the bridge server
+7. Done — approvals will appear on your wrist
+
+> **Attribution:** the iOS/watchOS source was originally derived from [shobhit99/claude-watch](https://github.com/shobhit99/claude-watch). Adapted to use Tailscale instead of Bonjour and to integrate with this bridge server.
 
 ---
 
