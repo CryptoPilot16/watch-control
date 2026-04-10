@@ -7,26 +7,45 @@
 
 ![watch-control landing page](assets/preview.png)
 
-Your AI agent runs on a remote Linux server inside `tmux`. When it needs approval, a watcher script detects the prompt, auto-identifies whether it's Codex or Claude Code, and sends a push notification via [Pushover](https://pushover.net). A single tap on your Apple Watch fires a GET request to a local webhook, which injects the correct keystroke — `y` for Codex, `1` for Claude Code — and your agent continues.
+Your AI agent runs on a remote Linux server inside `tmux`. When it needs approval, the request reaches your Apple Watch instantly — either via a native watchOS app over Tailscale, or via Pushover push notification as a fallback. A single tap approves or denies, and your agent continues.
 
-Watch multiple tmux panes simultaneously to run Codex and Claude Code side by side.
+Supports Codex and Claude Code side-by-side, with two delivery paths:
+
+- **Native Apple Watch app** — connects to a bridge server over Tailscale, shows the prompt on your wrist with Approve/Deny buttons
+- **Pushover notifications** — optional fallback that works without the native app
 
 ---
 
 ## How it works
 
 ```
-AI agent (tmux) → codex_watch.sh detects prompt → Pushover notification
-     ↑                                                       ↓
-approve_webhook.py injects keystroke          Apple Watch tap → GET /approve
+┌────────────────────┐
+│  Codex / Claude    │  running in tmux on your Linux server
+└─────────┬──────────┘
+          │ needs approval
+          ▼
+┌────────────────────┐     ┌─────────────────┐
+│  codex_watch.sh    │────▶│ approve_webhook │  injects keystroke into tmux
+│  (tmux poller)     │     │     .py         │
+└─────────┬──────────┘     └─────────────────┘
+          │
+          │ POST /hooks/codex
+          ▼
+┌────────────────────┐     ┌─────────────────┐
+│  bridge/server.js  │────▶│  Apple Watch    │  Approve / Deny
+│  (Node.js + SSE)   │     │   native app    │
+└────────────────────┘     └─────────────────┘
+          │
+          │ (optional fallback)
+          ▼
+┌────────────────────┐
+│     Pushover       │  notification with action button
+└────────────────────┘
 ```
 
-1. **Agent needs approval** — Codex or Claude Code pauses and waits for input
-2. **Watcher detects the prompt** — polls tmux output every 2s, identifies the agent automatically
-3. **Push notification sent** — Pushover delivers it to your iPhone and Apple Watch
-4. **You tap Approve** — iOS Shortcut fires a GET request to the webhook
-5. **Webhook injects the keystroke** — correct key (`y` or `1`) sent to the right tmux pane
-6. **Agent continues**
+**Codex flow** — `codex_watch.sh` polls tmux every 2s, detects the approval prompt, POSTs to the bridge, blocks until your Watch responds, then injects the correct keystroke (`y`) into tmux.
+
+**Claude Code flow** — Claude Code's native hook system POSTs directly to the bridge on `PermissionRequest`. The bridge blocks Claude until your Watch responds, then returns the decision so Claude resumes.
 
 ---
 
@@ -35,8 +54,11 @@ approve_webhook.py injects keystroke          Apple Watch tap → GET /approve
 ```
 watch-control/
 ├── approve_webhook.py        # HTTP webhook — validates secret, injects tmux keystrokes
-├── codex_watch.sh            # Watcher — polls tmux, detects prompts, sends Pushover alerts
+├── codex_watch.sh            # Watcher — polls tmux, detects prompts, posts to bridge
 ├── restart.sh                # Start/restart both services
+├── bridge/                   # Node.js bridge server for Apple Watch app
+│   ├── server.js             # SSE bridge — handles pairing, hooks, watch responses
+│   └── package.json
 ├── .env.example              # Environment variable template
 └── web/                      # Landing page source (Next.js, static export)
 ```
@@ -45,26 +67,38 @@ watch-control/
 
 ## Quick start
 
-**Prerequisites:** Linux server with tmux + Python 3, [Pushover](https://pushover.net) account, [Tailscale](https://tailscale.com) installed, Apple Watch with Shortcuts app.
+**Prerequisites:** Linux server with tmux + Python 3 + Node.js 18+, [Tailscale](https://tailscale.com), and either an Apple Watch with the native app sideloaded, or a [Pushover](https://pushover.net) account.
 
 ```bash
 git clone https://github.com/CryptoPilot16/watch-control.git watch-control
 cd watch-control
 cp .env.example .env
-# edit .env — fill in APPROVE_SECRET, PUSHOVER_APP_TOKEN, PUSHOVER_USER_KEY, APPROVE_PORT
+# edit .env — fill in APPROVE_SECRET (and PUSHOVER tokens if using fallback)
 bash ./restart.sh
 ```
 
-Expose via Tailscale Serve (tailnet-only, no public port):
+Start the bridge server (for the native Apple Watch app):
 
 ```bash
-tailscale serve --bg https:443 /webhook/ http://127.0.0.1:<APPROVE_PORT>
+cd bridge && node server.js
 ```
 
-Then set in `.env`:
-```
-APPROVE_URL=https://<your-machine>.ts.net/webhook/approve
-```
+The bridge prints a 6-digit pairing code at startup. Enter your Tailscale IP and that code into the Apple Watch app to pair.
+
+---
+
+## Apple Watch app
+
+A native watchOS companion app connects to your bridge over Tailscale and shows approval requests on your wrist with one-tap Approve/Deny.
+
+Repo: [github.com/CryptoPilot16/claude-watch](https://github.com/CryptoPilot16/claude-watch)
+
+**Setup:**
+1. Build and sideload the watchOS app via Xcode (requires Apple Developer account, $99/yr)
+2. Install Tailscale on your Apple Watch / paired iPhone — same tailnet as your VPS
+3. Open the app, enter your VPS Tailscale IP (e.g. `100.x.x.x`)
+4. Enter the 6-digit pairing code shown by the bridge server
+5. Done — approvals will appear on your wrist
 
 ---
 
@@ -73,9 +107,9 @@ APPROVE_URL=https://<your-machine>.ts.net/webhook/approve
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `APPROVE_SECRET` | yes | — | Shared secret for webhook auth |
-| `PUSHOVER_APP_TOKEN` | yes | — | Pushover app token |
-| `PUSHOVER_USER_KEY` | yes | — | Pushover user key |
-| `APPROVE_URL` | yes | — | Full Tailscale URL for the approve endpoint |
+| `BRIDGE_URL` | no | `http://100.x.x.x:7860` | Bridge server URL (Tailscale IP) |
+| `PUSHOVER_APP_TOKEN` | no | — | Pushover app token (fallback notifications) |
+| `PUSHOVER_USER_KEY` | no | — | Pushover user key (fallback notifications) |
 | `TMUX_SESSION` | no | `codex:0.0` | Default tmux target pane |
 | `TMUX_TARGETS` | no | `$TMUX_SESSION` | Space-separated list of panes to watch |
 | `APPROVE_PORT` | no | `8787` | Webhook listening port |
@@ -83,7 +117,22 @@ APPROVE_URL=https://<your-machine>.ts.net/webhook/approve
 
 ---
 
-## Webhook endpoints
+## Bridge endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/pair` | POST | Pair the watch with a 6-digit code, returns session token |
+| `/events` | GET | SSE stream — watch listens here for approval requests |
+| `/command` | POST | Watch posts approval/deny decisions |
+| `/hooks/permission` | POST | Claude Code `PermissionRequest` hook |
+| `/hooks/tool-output` | POST | Claude Code `PostToolUse` hook |
+| `/hooks/stop` | POST | Claude Code `Stop` hook |
+| `/hooks/codex` | POST | Codex approval — `codex_watch.sh` posts here |
+| `/status` | GET | Bridge health and session info |
+
+---
+
+## Webhook endpoints (legacy / Pushover path)
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -95,18 +144,33 @@ Auth via `?secret=<APPROVE_SECRET>` query param or `X-Secret` header.
 
 ---
 
-## Apple Watch setup
+## Claude Code hooks setup
 
-1. Find your Tailscale hostname: `tailscale status --json | python3 -c "import sys,json; print(json.load(sys.stdin)['Self']['DNSName'])"`
-2. Build your approve URL: `https://<hostname>/webhook/approve?secret=<APPROVE_SECRET>`
-3. Open **Shortcuts** on iPhone → new shortcut → add **Get Contents of URL** → paste the URL
-4. Name it **Approve Codex** → tap the info icon → toggle **Show on Apple Watch**
+Add to `~/.claude/settings.json` so Claude Code POSTs to the bridge directly:
+
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
+      { "command": "curl -s -X POST http://100.x.x.x:7860/hooks/permission -H 'Content-Type: application/json' -d @-" }
+    ],
+    "PostToolUse": [
+      { "command": "curl -s -X POST http://100.x.x.x:7860/hooks/tool-output -H 'Content-Type: application/json' -d @-" }
+    ],
+    "Stop": [
+      { "command": "curl -s -X POST http://100.x.x.x:7860/hooks/stop -H 'Content-Type: application/json' -d @-" }
+    ]
+  }
+}
+```
+
+Replace the Tailscale IP with your bridge server's address.
 
 ---
 
 ## Security
 
-The webhook listens on `127.0.0.1` only and is exposed exclusively over your Tailscale tailnet via `tailscale serve`. It is never reachable from the public internet. Every request must include the shared secret.
+The webhook listens on `127.0.0.1` only and is exposed exclusively over your Tailscale tailnet. The bridge server binds to `0.0.0.0:7860` but is reachable only via your tailnet. Pairing requires a 6-digit code shown in the server logs, and all subsequent watch requests use a session token (Bearer auth). Rate-limiting prevents brute-force pairing attempts.
 
 ---
 

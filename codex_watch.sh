@@ -11,9 +11,9 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-: "${PUSHOVER_APP_TOKEN:?Missing PUSHOVER_APP_TOKEN}"
-: "${PUSHOVER_USER_KEY:?Missing PUSHOVER_USER_KEY}"
 : "${APPROVE_SECRET:?Missing APPROVE_SECRET}"
+
+BRIDGE_URL="${BRIDGE_URL:-http://127.0.0.1:7860}"
 
 TMUX_SESSION="${TMUX_SESSION:-codex:0.0}"
 TMUX_TARGETS="${TMUX_TARGETS:-$TMUX_SESSION}"
@@ -106,17 +106,40 @@ should_send() {
 
 send_push() {
   local message="$1"
-  local resp
-  resp=$(curl -s \
-    -F "token=$PUSHOVER_APP_TOKEN" \
-    -F "user=$PUSHOVER_USER_KEY" \
-    -F "title=AI Approval Needed" \
-    -F "message=$message" \
-    -F "url=$APPROVE_URL" \
-    -F "url_title=Approve next" \
-    https://api.pushover.net/1/messages.json)
+  # Pushover kept as optional fallback if configured
+  if [[ -n "${PUSHOVER_APP_TOKEN:-}" && -n "${PUSHOVER_USER_KEY:-}" ]]; then
+    local resp
+    resp=$(curl -s \
+      -F "token=$PUSHOVER_APP_TOKEN" \
+      -F "user=$PUSHOVER_USER_KEY" \
+      -F "title=AI Approval Needed" \
+      -F "message=$message" \
+      -F "url=$APPROVE_URL" \
+      -F "url_title=Approve next" \
+      https://api.pushover.net/1/messages.json)
+    echo "$(date) pushover_resp=$resp" >> "$LOG_FILE"
+  fi
+}
 
-  echo "$(date) pushover_resp=$resp" >> "$LOG_FILE"
+send_to_watch() {
+  local target="$1"
+  local approve_key="$2"
+  local prompt="$3"
+
+  local resp approved
+  resp=$(curl -s -X POST "${BRIDGE_URL}/hooks/codex" \
+    -H "Content-Type: application/json" \
+    -d "{\"prompt\":\"$prompt\",\"session\":\"$target\"}" \
+    --max-time 600)
+
+  approved=$(echo "$resp" | grep -o '"approved":true' || true)
+
+  if [[ -n "$approved" ]]; then
+    echo "$(date) watch approved target=$target key=$approve_key" >> "$LOG_FILE"
+    tmux send-keys -t "$target" "$approve_key" Enter
+  else
+    echo "$(date) watch denied target=$target" >> "$LOG_FILE"
+  fi
 }
 
 declare -A IN_PROMPT=()
@@ -134,8 +157,9 @@ while true; do
         depth="$(queue_depth)"
         echo "$(date) queued target=$target key=$approve_key model=$detected_model depth=$depth" >> "$LOG_FILE"
         if should_send; then
-          send_push "Tap Approve next (queue: $depth, newest: $target)" || echo "$(date) send_push failed" >> "$LOG_FILE"
           now_ts > "$LAST_SENT_FILE"
+          send_push "Tap Approve next (queue: $depth, newest: $target)" || true
+          send_to_watch "$target" "$approve_key" "$(echo "$pane" | tail -5 | tr '\n' ' ' | tr '"' "'")" &
         fi
       fi
       IN_PROMPT["$target"]=1
