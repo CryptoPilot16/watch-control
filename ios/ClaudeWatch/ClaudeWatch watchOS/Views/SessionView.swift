@@ -115,11 +115,14 @@ struct SessionView: View {
     }
 
     private func terminalPage(_ page: TerminalPage) -> some View {
+        let lines = visibleLines(for: page.id)
+        let latestLineId = lines.last?.id
+
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 1) {
-                    ForEach(visibleLines(for: page.id)) { line in
-                        terminalLine(line)
+                    ForEach(lines) { line in
+                        terminalLine(line, isLatest: line.id == latestLineId)
                             .id(line.id)
                     }
 
@@ -166,9 +169,9 @@ struct SessionView: View {
     }
 
     @ViewBuilder
-    private func terminalLine(_ line: TerminalLine) -> some View {
+    private func terminalLine(_ line: TerminalLine, isLatest: Bool) -> some View {
         Text(line.text)
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .font(.system(size: 11, weight: isLatest ? .bold : .regular, design: .monospaced))
             .foregroundColor(colorFor(line))
             .lineLimit(4)
             .truncationMode(.tail)
