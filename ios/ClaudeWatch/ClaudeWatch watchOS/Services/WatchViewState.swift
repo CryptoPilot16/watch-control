@@ -79,6 +79,17 @@ class WatchViewState: ObservableObject {
             companionRelayActive = true
             setRelayStatus(status.message, isError: status.isError, targetId: status.targetId ?? currentTerminalTarget)
 
+        case .bridgeCredentials(let credentials):
+            companionRelayActive = true
+            if let url = URL(string: credentials.baseURL) {
+                bridge.setCredentials(baseURL: url, token: credentials.token)
+                isPaired = true
+                isReachable = true
+                if sseTask == nil {
+                    startEventStream()
+                }
+            }
+
         case .pasteResponse(let response):
             companionRelayActive = true
             if let text = response.text, !text.isEmpty {
@@ -102,7 +113,7 @@ class WatchViewState: ObservableObject {
             isPaired = status.state != .disconnected
             isReachable = status.state == .connected
 
-        case .voiceCommand, .voiceAudioCommand, .pasteRequest, .approvalResponse, .pasteResponse:
+        case .voiceCommand, .voiceAudioCommand, .pasteRequest, .approvalResponse:
             break
         }
     }
@@ -434,41 +445,28 @@ class WatchViewState: ObservableObject {
 
     func sendVoiceCommand(_ text: String) {
         let target = currentTerminalTarget
-        if companionRelayActive {
-            let command = WatchMessage.VoiceCommand(transcribedText: text, targetId: target)
-            sessionManager.sendRealtime(.voiceCommand(command), errorHandler: { error in
-                self.setRelayStatus(error.localizedDescription, isError: true, targetId: target)
-            })
+        if bridge.isPaired {
+            Task {
+                do {
+                    try await bridge.sendCommand(text, target: target)
+                    await MainActor.run {
+                        self.setRelayStatus("Sent", isError: false, targetId: target)
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.sendTextViaIPhoneRelay(text, target: target, fallbackError: error)
+                    }
+                }
+            }
             return
         }
 
-        guard let baseURL = bridge.baseURL, let token = bridge.token else {
-            appendLine(TerminalLine(text: "iPhone relay not reachable", type: .error, targetId: target))
-            return
-        }
-
-        let url = baseURL.appendingPathComponent("command")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        var body = ["command": text + "\n"]
-        if let target {
-            body["target"] = target
-        }
-        request.httpBody = try? JSONEncoder().encode(body)
-
-        URLSession.shared.dataTask(with: request) { _, _, error in
-            if let error { print("[WatchViewState] Command send failed: \(error)") }
-        }.resume()
+        sendTextViaIPhoneRelay(text, target: target)
     }
 
     func sendAudioCommand(_ audioData: Data) {
         let target = currentTerminalTarget
-        let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: target)
-        sessionManager.sendRealtime(.voiceAudioCommand(command), errorHandler: { error in
-            self.setRelayStatus(error.localizedDescription, isError: true, targetId: target)
-        })
+        sendAudioViaIPhoneRelay(audioData, target: target)
     }
 
     // MARK: - Token rejected (bridge restarted)
@@ -502,6 +500,32 @@ class WatchViewState: ObservableObject {
 
     private var currentTerminalTarget: String? {
         selectedTerminalTarget ?? sessionState.targetId ?? sessionState.terminalPages.first?.id
+    }
+
+    private func sendTextViaIPhoneRelay(_ text: String, target: String?, fallbackError: Error? = nil) {
+        let command = WatchMessage.VoiceCommand(transcribedText: text, targetId: target)
+        sessionManager.sendRealtime(.voiceCommand(command), errorHandler: { error in
+            DispatchQueue.main.async {
+                self.setRelayStatus(
+                    fallbackError?.localizedDescription ?? error.localizedDescription,
+                    isError: true,
+                    targetId: target
+                )
+            }
+        })
+    }
+
+    private func sendAudioViaIPhoneRelay(_ audioData: Data, target: String?, fallbackError: Error? = nil) {
+        let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: target)
+        sessionManager.sendRealtime(.voiceAudioCommand(command), errorHandler: { error in
+            DispatchQueue.main.async {
+                self.setRelayStatus(
+                    fallbackError?.localizedDescription ?? error.localizedDescription,
+                    isError: true,
+                    targetId: target
+                )
+            }
+        })
     }
 
     private func setRelayStatus(_ text: String, isError: Bool, targetId: String?) {

@@ -24,6 +24,13 @@ class WatchBridgeClient: ObservableObject {
         token = UserDefaults.standard.string(forKey: "watch_bridge_token")
     }
 
+    func setCredentials(baseURL: URL, token: String) {
+        self.baseURL = baseURL
+        self.token = token
+        UserDefaults.standard.set(baseURL.absoluteString, forKey: "watch_bridge_url")
+        UserDefaults.standard.set(token, forKey: "watch_bridge_token")
+    }
+
     /// Discover bridge via Bonjour on LAN, fallback to localhost (simulator)
     func discover() async -> URL? {
         // Try Bonjour first (works on real watch over Wi-Fi)
@@ -94,6 +101,30 @@ class WatchBridgeClient: ObservableObject {
         let (data, _) = try await session.data(for: request)
         let status = try JSONDecoder().decode(BridgeStatus.self, from: data)
         return [BridgeEvent(state: status.state, hasPty: status.hasPty)]
+    }
+
+    func sendCommand(_ text: String, target: String?) async throws {
+        guard let baseURL, let token else { throw BridgeError.notPaired }
+        let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+
+        let url = baseURL.appendingPathComponent("command")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        var body = ["command": command + "\n"]
+        if let target {
+            body["target"] = target
+        }
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            throw BridgeError.network
+        }
     }
 
     func unpair() {

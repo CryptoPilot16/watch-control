@@ -473,10 +473,18 @@ struct ConnectionStatusView: View {
                 .padding(.bottom, terminalPages.count > 1 ? 18 : 0)
             }
             .onChange(of: relayService.recentTerminalLines.count) { _, _ in
-                if let lastLine = lines(for: page.id).last {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(lastLine.id, anchor: .bottom)
-                    }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    scrollToBottom(proxy, pageId: page.id)
+                }
+            }
+            .onChange(of: relayService.selectedTerminalTarget) { _, _ in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    scrollToBottom(proxy, pageId: page.id)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.async {
+                    scrollToBottom(proxy, pageId: page.id)
                 }
             }
         }
@@ -484,9 +492,15 @@ struct ConnectionStatusView: View {
 
     private func terminalLineView(_ line: TerminalLine) -> some View {
         Text(line.text)
-            .font(.system(size: 13, design: .monospaced))
+            .font(.system(size: 13, weight: .bold, design: .monospaced))
             .foregroundStyle(colorForTerminalLine(line))
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, pageId: String) {
+        if let lastLine = lines(for: pageId).last {
+            proxy.scrollTo(lastLine.id, anchor: .bottom)
+        }
     }
 
     private func colorForTerminalLine(_ line: TerminalLine) -> Color {

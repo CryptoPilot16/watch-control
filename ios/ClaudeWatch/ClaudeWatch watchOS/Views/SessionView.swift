@@ -137,11 +137,17 @@ struct SessionView: View {
             }
             .onChange(of: session.terminalLines.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.1)) {
-                    if isThinking(on: page.id) {
-                        proxy.scrollTo("cursor-\(page.id)", anchor: .bottom)
-                    } else if let last = visibleLines(for: page.id).last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+                    scrollToBottom(proxy, pageId: page.id)
+                }
+            }
+            .onChange(of: session.selectedTerminalTarget) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    scrollToBottom(proxy, pageId: page.id)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.async {
+                    scrollToBottom(proxy, pageId: page.id)
                 }
             }
         }
@@ -155,11 +161,19 @@ struct SessionView: View {
     @ViewBuilder
     private func terminalLine(_ line: TerminalLine) -> some View {
         Text(line.text)
-            .font(.system(size: 11, design: .monospaced))
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundColor(colorFor(line))
             .lineLimit(4)
             .truncationMode(.tail)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, pageId: String) {
+        if isThinking(on: pageId) {
+            proxy.scrollTo("cursor-\(pageId)", anchor: .bottom)
+        } else if let last = visibleLines(for: pageId).last {
+            proxy.scrollTo(last.id, anchor: .bottom)
+        }
     }
 
     private func isThinking(on targetId: String) -> Bool {
@@ -250,7 +264,7 @@ struct SessionView: View {
         } else if canSendTypedCommand {
             sendCommand()
         } else {
-            commandError = "Hold to speak"
+            presentDictation()
         }
     }
 
@@ -285,6 +299,29 @@ struct SessionView: View {
         HapticManager.commandSent()
         session.sendVoiceCommand(text)
         commandText = ""
+    }
+
+    private func presentDictation() {
+        guard let controller = WKExtension.shared().visibleInterfaceController else {
+            commandError = "Could not open dictation"
+            return
+        }
+
+        commandError = nil
+        controller.presentTextInputController(
+            withSuggestions: nil,
+            allowedInputMode: .plain
+        ) { results in
+            DispatchQueue.main.async {
+                guard let text = results?.compactMap({ $0 as? String }).first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !text.isEmpty
+                else { return }
+
+                HapticManager.commandSent()
+                session.sendVoiceCommand(text)
+            }
+        }
     }
 
     private var statusColor: Color {

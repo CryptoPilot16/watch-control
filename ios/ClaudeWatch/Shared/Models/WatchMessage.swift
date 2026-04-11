@@ -16,6 +16,7 @@ enum WatchMessage: Codable {
     case approvalResponse(ApprovalResponse)
 
     // iPhone -> Watch
+    case bridgeCredentials(BridgeCredentials)
     case terminalUpdate(TerminalUpdate)
     case approvalRequestMessage(ApprovalRequest)
     case sessionStateUpdate(SessionState)
@@ -61,6 +62,11 @@ enum WatchMessage: Codable {
             self.isError = isError
             self.targetId = targetId
         }
+    }
+
+    struct BridgeCredentials: Codable {
+        let baseURL: String
+        let token: String
     }
 
     struct PasteRequest: Codable {
@@ -130,6 +136,7 @@ enum WatchMessage: Codable {
         case .pasteResponse:          return "pasteResponse"
         case .commandStatus:          return "commandStatus"
         case .approvalResponse:       return "approvalResponse"
+        case .bridgeCredentials:      return "bridgeCredentials"
         case .terminalUpdate:         return "terminalUpdate"
         case .approvalRequestMessage: return "approvalRequestMessage"
         case .sessionStateUpdate:     return "sessionStateUpdate"
@@ -184,6 +191,8 @@ enum WatchMessage: Codable {
             try container.encode(status, forKey: .payload)
         case .approvalResponse(let resp):
             try container.encode(resp, forKey: .payload)
+        case .bridgeCredentials(let credentials):
+            try container.encode(credentials, forKey: .payload)
         case .terminalUpdate(let update):
             try container.encode(update, forKey: .payload)
         case .approvalRequestMessage(let req):
@@ -212,6 +221,8 @@ enum WatchMessage: Codable {
             self = .commandStatus(try container.decode(CommandStatus.self, forKey: .payload))
         case "approvalResponse":
             self = .approvalResponse(try container.decode(ApprovalResponse.self, forKey: .payload))
+        case "bridgeCredentials":
+            self = .bridgeCredentials(try container.decode(BridgeCredentials.self, forKey: .payload))
         case "terminalUpdate":
             self = .terminalUpdate(try container.decode(TerminalUpdate.self, forKey: .payload))
         case "approvalRequestMessage":

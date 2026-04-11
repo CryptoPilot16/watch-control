@@ -220,6 +220,7 @@ final class RelayService: ObservableObject {
     /// watch app launches after the iPhone has already paired with the bridge.
     func syncWatchState() {
         guard isPaired else { return }
+        sendBridgeCredentialsToWatch()
         updateWatchState()
         sendTerminalSnapshotToWatch()
         Task { await refreshTargets() }
@@ -795,6 +796,16 @@ final class RelayService: ObservableObject {
         )
 
         sessionManager.updateApplicationContext(with: state)
+        sendBridgeCredentialsToWatch()
+    }
+
+    private func sendBridgeCredentialsToWatch() {
+        guard let baseURL = bridgeClient.baseURL,
+              let token = bridgeClient.token else { return }
+        sessionManager.send(.bridgeCredentials(WatchMessage.BridgeCredentials(
+            baseURL: baseURL.absoluteString,
+            token: token
+        )))
     }
 
     private func sendTerminalSnapshotToWatch() {
