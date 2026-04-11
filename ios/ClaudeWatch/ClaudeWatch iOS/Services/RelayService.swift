@@ -193,6 +193,13 @@ final class RelayService: ObservableObject {
         sseClient.reconnectNow()
     }
 
+    /// Re-sends the latest session state to the Apple Watch. Useful when the
+    /// watch app launches after the iPhone has already paired with the bridge.
+    func syncWatchState() {
+        guard isPaired else { return }
+        updateWatchState()
+    }
+
     private func handleBridgeEvent(_ event: SSEClient.SSEEvent) {
         guard let eventType = event.event else { return }
         let data = event.data

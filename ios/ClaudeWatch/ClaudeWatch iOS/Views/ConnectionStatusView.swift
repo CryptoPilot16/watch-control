@@ -58,6 +58,7 @@ struct ConnectionStatusView: View {
             // instead of going stale.
             if newPhase == .active {
                 relayService.reconnectStream()
+                relayService.syncWatchState()
             }
         }
     }
