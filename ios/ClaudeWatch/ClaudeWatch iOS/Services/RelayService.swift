@@ -55,6 +55,7 @@ final class RelayService: ObservableObject {
     private var watchAudioRecognitionTask: SFSpeechRecognitionTask?
 
     private var elapsedTimer: Timer?
+    private var targetRefreshTimer: Timer?
     private var sessionStartDate: Date?
 
     private var cancellables = Set<AnyCancellable>()
@@ -117,6 +118,7 @@ final class RelayService: ObservableObject {
         // Start SSE connection
         startEventStream()
         startElapsedTimer()
+        startTargetRefreshTimer()
 
         // Notify watch of connection
         updateWatchState()
@@ -127,6 +129,7 @@ final class RelayService: ObservableObject {
         sseClient.disconnect()
         bridgeClient.clearCredentials()
         stopElapsedTimer()
+        stopTargetRefreshTimer()
         terminalBatchTimer?.invalidate()
         terminalBatchTimer = nil
 
@@ -162,6 +165,7 @@ final class RelayService: ObservableObject {
         connectionState = .connecting
         startEventStream()
         startElapsedTimer()
+        startTargetRefreshTimer()
     }
 
     // MARK: - SSE
@@ -192,6 +196,7 @@ final class RelayService: ObservableObject {
                     self?.lastConnected = Date()
                     UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "last_connected")
                     self?.updateWatchState()
+                    self?.startTargetRefreshTimer()
                     Task { await self?.refreshTargets() }
                 case .connecting:
                     self?.connectionState = .connecting
@@ -883,6 +888,23 @@ final class RelayService: ObservableObject {
     private func stopElapsedTimer() {
         elapsedTimer?.invalidate()
         elapsedTimer = nil
+    }
+
+    private func startTargetRefreshTimer() {
+        guard targetRefreshTimer == nil else { return }
+        targetRefreshTimer = Timer.scheduledTimer(
+            withTimeInterval: 5.0,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.refreshTargets()
+            }
+        }
+    }
+
+    private func stopTargetRefreshTimer() {
+        targetRefreshTimer?.invalidate()
+        targetRefreshTimer = nil
     }
 
     // MARK: - JSON helpers

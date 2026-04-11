@@ -138,19 +138,73 @@ async function listAgentTargets() {
     "list-panes",
     "-a",
     "-F",
-    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}",
+    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}",
   ]);
-  return stdout
+  const panes = stdout
     .trim()
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const [id, command = "", path = "", title = ""] = line.split("\t");
-      return { id, command: command.toLowerCase(), path, title };
-    })
-    .filter((pane) => AGENT_COMMAND_RE.test(pane.command))
+      const [id, pid = "", command = "", path = "", title = ""] = line.split("\t");
+      return { id, pid, command: command.toLowerCase(), path, title };
+    });
+  const processes = await listProcesses();
+  return panes
+    .map((pane) => ({
+      ...pane,
+      command: resolveAgentCommand(pane, processes),
+    }))
+    .filter((pane) => pane.command)
     .slice(0, MAX_AGENT_TARGETS)
     .map((pane, index) => ({ ...pane, color: TARGET_COLORS[index % TARGET_COLORS.length] }));
+}
+
+async function listProcesses() {
+  try {
+    const stdout = await execFilePromise("ps", ["-eo", "pid=,ppid=,comm=,args="]);
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
+        if (!match) return null;
+        return {
+          pid: match[1],
+          ppid: match[2],
+          command: match[3].toLowerCase(),
+          args: match[4].toLowerCase(),
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function resolveAgentCommand(pane, processes) {
+  if (AGENT_COMMAND_RE.test(pane.command)) return pane.command;
+
+  const descendantPids = new Set([pane.pid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of processes) {
+      if (!descendantPids.has(process.pid) && descendantPids.has(process.ppid)) {
+        descendantPids.add(process.pid);
+        changed = true;
+      }
+    }
+  }
+
+  for (const process of processes) {
+    if (!descendantPids.has(process.pid)) continue;
+    if (AGENT_COMMAND_RE.test(process.command)) return process.command;
+    if (process.args.includes("/codex") || process.args.includes(" codex")) return "codex";
+    if (process.args.includes("/claude") || process.args.includes(" claude")) return "claude";
+  }
+
+  return "";
 }
 
 function syncMirrorTargetsWithTargets(targets) {
