@@ -265,6 +265,46 @@ function resolveAgentCommand(pane, processes) {
   return "";
 }
 
+function isPidDescendantOfPane(pid, panePid, processes) {
+  const targetPid = String(pid || "");
+  if (!targetPid) return false;
+
+  const descendantPids = new Set([String(panePid)]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of processes) {
+      if (!descendantPids.has(process.pid) && descendantPids.has(process.ppid)) {
+        descendantPids.add(process.pid);
+        changed = true;
+      }
+    }
+  }
+
+  return descendantPids.has(targetPid);
+}
+
+async function isTrackedHookRequest(body) {
+  const hook = body.watchcontrol_hook || {};
+  const hookPid = hook.agent_pid || hook.hook_pid;
+  if (!hookPid) return false;
+
+  const targets = await listAgentTargets();
+  const processes = await listProcesses();
+  return targets.some((target) => isPidDescendantOfPane(hookPid, target.pid, processes));
+}
+
+function ignoredHookResponse(res, reason) {
+  return jsonResponse(res, 200, {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
+      permissionDecisionReason: reason,
+      decision: { behavior: "ask" },
+    },
+  });
+}
+
 function syncMirrorTargetsWithTargets(targets) {
   const validIds = new Set(targets.map((target) => target.id));
 
@@ -721,6 +761,12 @@ async function handleHookPermission(req, res) {
   if (req.method !== "POST") return jsonResponse(res, 405, { error: "Method not allowed" });
   let body;
   try { body = await readBody(req); } catch { return jsonResponse(res, 400, { error: "Invalid JSON" }); }
+  if (!(await isTrackedHookRequest(body))) {
+    const reason = "watch-control ignored this hook because it is not from a tracked tmux Claude/Codex pane.";
+    log("info", "Ignoring untracked Claude hook", body.tool_name || "", body.watchcontrol_hook || {});
+    return ignoredHookResponse(res, reason);
+  }
+
   const permissionId = crypto.randomUUID();
   log("info", `Permission request received (id: ${permissionId})`, body.tool_name || "");
   if (body.permission_suggestions) pendingPermissionBodies.set(permissionId, body.permission_suggestions);

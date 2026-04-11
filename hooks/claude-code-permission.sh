@@ -38,6 +38,39 @@ ENDPOINT="${BRIDGE_URL}/hooks/permission"
 # as a single JSON object.
 input="$(cat)"
 
+find_agent_ancestor_pid() {
+  local pid="${PPID}"
+  local line ppid comm args
+
+  while [[ -n "${pid}" && "${pid}" != "0" ]]; do
+    line="$(ps -o ppid= -o comm= -o args= -p "${pid}" 2>/dev/null || true)"
+    [[ -z "${line}" ]] && break
+
+    read -r ppid comm args <<<"${line}"
+    if [[ "${comm}" == "claude" || "${comm}" == "codex" || " ${args} " =~ [[:space:]][^[:space:]]*/?(claude|codex)([[:space:]]|$) ]]; then
+      printf '%s\n' "${pid}"
+      return 0
+    fi
+    pid="${ppid}"
+  done
+}
+
+agent_pid="$(find_agent_ancestor_pid || true)"
+hook_pid="$$"
+
+input="$(
+  printf '%s' "${input}" | WATCHCONTROL_HOOK_PID="${hook_pid}" WATCHCONTROL_HOOK_AGENT_PID="${agent_pid}" node -e '
+    const fs = require("fs");
+    const raw = fs.readFileSync(0, "utf8");
+    const payload = JSON.parse(raw);
+    payload.watchcontrol_hook = {
+      hook_pid: process.env.WATCHCONTROL_HOOK_PID || null,
+      agent_pid: process.env.WATCHCONTROL_HOOK_AGENT_PID || null,
+    };
+    process.stdout.write(JSON.stringify(payload));
+  '
+)"
+
 # POST it to the bridge. The bridge blocks until the watch (or iPhone)
 # responds, then returns a JSON object whose top-level
 # hookSpecificOutput.permissionDecision is "allow" or "deny".
