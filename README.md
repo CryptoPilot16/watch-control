@@ -29,23 +29,25 @@ Supports Codex and Claude Code side-by-side, with two delivery paths:
 │  (tmux poller)     │     │     .py         │
 └─────────┬──────────┘     └─────────────────┘
           │
-          │ POST /hooks/codex
+          │ POST /hooks/codex (or /hooks/permission for Claude Code)
           ▼
-┌────────────────────┐     ┌─────────────────┐
-│  bridge/server.js  │────▶│  Apple Watch    │  Approve / Deny
-│  (Node.js + SSE)   │     │   native app    │
-└────────────────────┘     └─────────────────┘
+┌────────────────────┐     ┌─────────────────┐     ┌────────────────┐
+│  bridge/server.js  │◀───▶│   iPhone app    │◀───▶│  Apple Watch   │
+│  (Node.js + SSE)   │ SSE │  (relay + UI)   │ WC  │   native app   │
+└────────────────────┘     └─────────────────┘     └────────────────┘
           │
-          │ (optional fallback)
+          │ (optional fallback, no iPhone needed)
           ▼
 ┌────────────────────┐
 │     Pushover       │  notification with action button
 └────────────────────┘
 ```
 
-**Codex flow** — `codex_watch.sh` polls tmux every 2s, detects the approval prompt, POSTs to the bridge, blocks until your Watch responds, then injects the correct keystroke (`y`) into tmux.
+The bridge talks to the **iPhone app** over SSE on your Tailscale tailnet. The iPhone app pairs with the bridge once (6-digit code), then keeps a long-lived event stream open and forwards approval requests to the **Apple Watch** over `WCSession`. Approve or deny on either device — the response flows back through the iPhone to the bridge, which unblocks the agent.
 
-**Claude Code flow** — Claude Code's native hook system POSTs directly to the bridge on `PermissionRequest`. The bridge blocks Claude until your Watch responds, then returns the decision so Claude resumes.
+**Codex flow** — `codex_watch.sh` polls tmux every 2s, detects the approval prompt, POSTs to the bridge, blocks until your Watch (or iPhone) responds, then injects the correct keystroke (`y`) into tmux.
+
+**Claude Code flow** — Claude Code's native hook system POSTs directly to the bridge on `PermissionRequest`. The bridge blocks Claude until your Watch (or iPhone) responds, then returns the decision so Claude resumes.
 
 ---
 
@@ -89,22 +91,27 @@ The bridge prints a 6-digit pairing code at startup. Enter your Tailscale IP and
 
 ---
 
-## Apple Watch app
+## iPhone + Apple Watch app
 
-A native watchOS companion app connects to your bridge over Tailscale and shows approval requests on your wrist with one-tap Approve/Deny.
+A two-target SwiftUI app: an **iPhone app** that holds the bridge connection and a **watchOS app** that displays approvals on your wrist.
+
+- The **iPhone app** does the actual Tailscale → bridge HTTP/SSE work and shows the prompt directly when the watch isn't paired or reachable.
+- The **watchOS app** receives state and approval requests from the iPhone over `WCSession` (no internet on the watch required), and lets you tap Approve/Deny on your wrist.
 
 Source lives in [`ios/`](ios/) — open `ios/ClaudeWatch/ClaudeWatch.xcodeproj` in Xcode.
 
 **Setup:**
-1. Open the Xcode project on a Mac (requires Apple Developer account, $99/yr to sideload)
-2. Set your signing team in **ClaudeWatch iOS** and **ClaudeWatch watchOS** targets
-3. Install Tailscale on your Apple Watch / paired iPhone — same tailnet as your VPS
-4. Build and run on your iPhone — the Watch app deploys alongside the iOS app
-5. Open the app, enter your VPS Tailscale IP (e.g. `100.x.x.x`)
-6. Enter the 6-digit pairing code shown by the bridge server
-7. Done — approvals will appear on your wrist
+1. Open the Xcode project on a Mac. A paid Apple Developer account ($99/yr) is recommended — free accounts can sideload but watchOS sideloads are notoriously fragile.
+2. Set your signing team in **ClaudeWatch iOS** and **ClaudeWatchWatch** targets (Signing & Capabilities → Team).
+3. Install Tailscale on your iPhone — same tailnet as your VPS.
+4. Plug your iPhone into the Mac, build and run the **`ClaudeWatch`** scheme targeting your iPhone. The watch app embeds and auto-installs on the paired Apple Watch.
+5. On the iPhone, open the **watch-control** app. On the pairing screen, type your VPS's Tailscale IP into the **Bridge IP** field (e.g. `100.x.x.x`).
+6. Enter the 6-digit pairing code shown by the bridge server's terminal.
+7. Done — the iPhone shows approval prompts directly, and forwards them to the watch when you're wearing it.
 
-> **Attribution:** the iOS/watchOS source was originally derived from [shobhit99/claude-watch](https://github.com/shobhit99/claude-watch). Adapted to use Tailscale instead of Bonjour and to integrate with this bridge server.
+> **Note on the Apple Watch app:** for sideloads on watchOS 10+ the Apple Watch needs **Developer Mode** turned on (Settings → Privacy & Security → Developer Mode → restart → confirm). Xcode will only "see" the watch as a build destination after both Developer Mode is enabled and the watch is registered via Window → Devices and Simulators.
+
+> **Attribution:** the iOS/watchOS source was originally derived from [shobhit99/claude-watch](https://github.com/shobhit99/claude-watch). Adapted to use Tailscale instead of Bonjour, to integrate with this bridge server, and rebranded to watch-control.
 
 ---
 
