@@ -48,6 +48,8 @@ let tmuxMirrorTargets = new Set(activeCommandTarget ? [activeCommandTarget] : []
 let tmuxMirrorLinesByTarget = new Map();
 let tmuxMirrorActive = false;
 let tmuxMirrorLastError = null;
+const knownCommandTargets = new Map();
+const remainOnExitTargets = new Set();
 
 function generatePairingCode() {
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
@@ -138,25 +140,81 @@ async function listAgentTargets() {
     "list-panes",
     "-a",
     "-F",
-    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}",
+    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}\t#{pane_dead}",
   ]);
   const panes = stdout
     .trim()
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const [id, pid = "", command = "", path = "", title = ""] = line.split("\t");
-      return { id, pid, command: command.toLowerCase(), path, title };
+      const [id, pid = "", command = "", path = "", title = "", dead = "0"] = line.split("\t");
+      return { id, pid, command: command.toLowerCase(), path, title, dead: dead === "1" };
     });
+  const paneIds = new Set(panes.map((pane) => pane.id));
+  for (const target of [...knownCommandTargets.keys()]) {
+    if (!paneIds.has(target)) {
+      knownCommandTargets.delete(target);
+      tmuxMirrorTargets.delete(target);
+      tmuxMirrorLinesByTarget.delete(target);
+      remainOnExitTargets.delete(target);
+      if (activeCommandTarget === target) activeCommandTarget = null;
+      if (tmuxMirrorTarget === target) tmuxMirrorTarget = null;
+    }
+  }
+
   const processes = await listProcesses();
-  return panes
-    .map((pane) => ({
+  const targets = [];
+  const remainOnExitTasks = [];
+  for (const pane of panes) {
+    const previous = knownCommandTargets.get(pane.id);
+    const agentCommand = pane.dead ? "" : resolveAgentCommand(pane, processes);
+    if (!agentCommand && !previous) continue;
+
+    if (agentCommand && !remainOnExitTargets.has(pane.id)) {
+      remainOnExitTasks.push(setPaneRemainOnExit(pane.id).then(() => {
+        remainOnExitTargets.add(pane.id);
+      }));
+    }
+
+    const target = {
       ...pane,
-      command: resolveAgentCommand(pane, processes),
-    }))
-    .filter((pane) => pane.command)
-    .slice(0, MAX_AGENT_TARGETS)
-    .map((pane, index) => ({ ...pane, color: TARGET_COLORS[index % TARGET_COLORS.length] }));
+      command: agentCommand || normalizeTargetCommand(pane.command, pane.dead),
+      color: previous?.color || TARGET_COLORS[targets.length % TARGET_COLORS.length],
+    };
+    targets.push(target);
+    knownCommandTargets.set(pane.id, target);
+  }
+
+  if (remainOnExitTasks.length) {
+    await Promise.all(remainOnExitTasks.map((task) => task.catch((err) => {
+      log("warn", "Unable to mark tmux pane remain-on-exit:", err.message);
+    })));
+  }
+
+  return targets.slice(0, MAX_AGENT_TARGETS);
+}
+
+function normalizeTargetCommand(command, dead) {
+  if (dead) return "closed";
+  if (!command || ["bash", "sh", "zsh", "fish", "login"].includes(command)) return "shell";
+  return command;
+}
+
+function setPaneRemainOnExit(target) {
+  return execFilePromise("tmux", ["set-option", "-p", "-t", target, "remain-on-exit", "on"]);
+}
+
+async function ensureTmuxTargetAlive(target) {
+  const stdout = await execFilePromise("tmux", ["display-message", "-p", "-t", target, "#{pane_dead}"]);
+  if (stdout.trim() !== "1") return false;
+
+  await execFilePromise("tmux", ["respawn-pane", "-k", "-t", target]);
+  const previous = knownCommandTargets.get(target);
+  if (previous) knownCommandTargets.set(target, { ...previous, command: "shell", dead: false });
+  tmuxMirrorLinesByTarget.delete(target);
+  tmuxMirrorActive = false;
+  log("info", `Respawned dead tmux pane ${target} into a shell`);
+  return true;
 }
 
 async function listProcesses() {
@@ -550,6 +608,7 @@ async function handleCommand(req, res) {
       target = await resolveCommandTarget(requestedTarget);
       tmuxMirrorTarget = target;
       tmuxMirrorTargets.add(target);
+      await ensureTmuxTargetAlive(target);
       await sendTmuxCommand(target, commandText);
       log("info", `Watch command sent to ${target}: ${commandText.slice(0, 120)}`);
       scheduleTmuxMirrorRefresh();
@@ -779,6 +838,9 @@ const server = http.createServer(onRequest);
 server.listen(PORT, "0.0.0.0", () => {
   const code = generatePairingCode();
   startTmuxMirror();
+  listAgentTargets().catch((err) => {
+    log("warn", "Initial tmux target scan failed:", err.message);
+  });
   console.log("");
   console.log("╔═══════════════════════════════════════╗");
   console.log("║      WATCHCONTROL BRIDGE              ║");
