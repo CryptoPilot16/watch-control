@@ -18,7 +18,7 @@ struct SessionView: View {
             // Top bar
             HStack(spacing: 3) {
                 ClaudeMascot(size: 11)
-                Text("Claude")
+                Text(sessionLabel)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(targetColor)
                 if let targetId = session.selectedTerminalTarget ?? session.sessionState.targetId {
@@ -204,6 +204,21 @@ struct SessionView: View {
             return Color(hex: hex)
         }
         return Theme.Text.primary
+    }
+
+    private var sessionLabel: String {
+        let targetId = terminalPageSelection.wrappedValue
+        let title = session.terminalPages.first(where: { $0.id == targetId })?.title
+            ?? session.sessionState.targetTitle
+            ?? ""
+        let normalized = title.lowercased()
+        if normalized.contains("codex") {
+            return "Codex"
+        }
+        if normalized.contains("claude") {
+            return "Claude"
+        }
+        return "Session"
     }
 
     private var commandStatusText: String? {

@@ -492,7 +492,7 @@ struct ConnectionStatusView: View {
 
     private func terminalLineView(_ line: TerminalLine) -> some View {
         Text(line.text)
-            .font(.system(size: 13, weight: .bold, design: .monospaced))
+            .font(.system(size: 13, weight: .regular, design: .monospaced))
             .foregroundStyle(colorForTerminalLine(line))
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -509,10 +509,10 @@ struct ConnectionStatusView: View {
 
     private func colorForLineType(_ type: TerminalLine.LineType) -> Color {
         switch type {
-        case .output:   return .white
+        case .output:   return Color(white: 0.75)
         case .command:  return .white
         case .system:   return Color.subtleText
-        case .thinking: return .white.opacity(0.5)
+        case .thinking: return Color(white: 0.75).opacity(0.6)
         case .error:    return .red
         }
     }
@@ -552,7 +552,7 @@ struct ConnectionStatusView: View {
         if let target = relayService.activeTerminalTarget {
             return target
         }
-        return "No Claude session"
+        return "No session"
     }
 
     private var activeTargetColor: Color {

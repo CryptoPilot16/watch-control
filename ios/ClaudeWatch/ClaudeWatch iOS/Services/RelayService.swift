@@ -522,91 +522,11 @@ final class RelayService: ObservableObject {
     }
 
     private func handleToolOutput(_ data: String) {
-        guard let json = parseJSON(data) else { return }
-        let toolName = json["tool_name"] as? String ?? "tool"
-        let toolInput = json["tool_input"] as? [String: Any] ?? [:]
-        let toolOutput = json["tool_output"] as? String
-
-        // Format like a real terminal: show what Claude did and the result
-        var lines: [TerminalLine] = []
-
-        switch toolName {
-        case "Bash":
-            let cmd = toolInput["command"] as? String ?? ""
-            lines.append(TerminalLine(text: "$ \(cmd)", type: .command))
-            if let output = toolOutput, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Show first ~10 lines of output
-                let outputLines = output.components(separatedBy: "\n")
-                for line in outputLines.prefix(10) {
-                    let cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleaned.isEmpty {
-                        lines.append(TerminalLine(text: cleaned, type: .output))
-                    }
-                }
-                if outputLines.count > 10 {
-                    lines.append(TerminalLine(text: "  ... (\(outputLines.count - 10) more lines)", type: .system))
-                }
-            }
-
-        case "Read":
-            let path = toolInput["file_path"] as? String ?? ""
-            let filename = (path as NSString).lastPathComponent
-            lines.append(TerminalLine(text: "Read \(filename)", type: .system))
-
-        case "Write":
-            let path = toolInput["file_path"] as? String ?? ""
-            let filename = (path as NSString).lastPathComponent
-            lines.append(TerminalLine(text: "Write \(filename)", type: .system))
-
-        case "Edit":
-            let path = toolInput["file_path"] as? String ?? ""
-            let filename = (path as NSString).lastPathComponent
-            let oldStr = toolInput["old_string"] as? String ?? ""
-            let newStr = toolInput["new_string"] as? String ?? ""
-            lines.append(TerminalLine(text: "Edit \(filename)", type: .system))
-            if !oldStr.isEmpty {
-                let preview = oldStr.components(separatedBy: "\n").first ?? ""
-                lines.append(TerminalLine(text: "  - \(String(preview.prefix(60)))", type: .error))
-            }
-            if !newStr.isEmpty {
-                let preview = newStr.components(separatedBy: "\n").first ?? ""
-                lines.append(TerminalLine(text: "  + \(String(preview.prefix(60)))", type: .output))
-            }
-
-        case "Grep":
-            let pattern = toolInput["pattern"] as? String ?? ""
-            lines.append(TerminalLine(text: "grep \"\(pattern)\"", type: .command))
-            if let output = toolOutput, !output.isEmpty {
-                let resultLines = output.components(separatedBy: "\n").filter { !$0.isEmpty }
-                lines.append(TerminalLine(text: "  \(resultLines.count) matches", type: .system))
-            }
-
-        case "Glob":
-            let pattern = toolInput["pattern"] as? String ?? ""
-            lines.append(TerminalLine(text: "find \"\(pattern)\"", type: .command))
-
-        default:
-            lines.append(TerminalLine(text: "[\(toolName)]", type: .system))
-            if let output = toolOutput {
-                let preview = String(output.prefix(100)).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !preview.isEmpty {
-                    lines.append(TerminalLine(text: preview, type: .output))
-                }
-            }
-        }
-
-        for line in lines {
-            terminalBuffer.append(line)
-            pendingTerminalLines.append(line)
-        }
-        refreshRecentTerminalLines(limit: 10)
-        scheduleBatchSend()
+        _ = data
     }
 
     private func handleTaskComplete(_ data: String) {
-        let line = TerminalLine(text: "Task completed", type: .system)
-        terminalBuffer.append(line)
-        refreshRecentTerminalLines()
+        _ = data
         notificationService.postTaskComplete()
         updateWatchState()
     }
