@@ -47,6 +47,7 @@ final class SSEClient {
     private var urlSession: URLSession?
     private var dataTask: URLSessionDataTask?
     private var heartbeatTimer: Timer?
+    private var ignoredCompletionTaskIds = Set<Int>()
 
     /// Current backoff delay for the next reconnect attempt. Doubles on each
     /// consecutive failure and resets to `initialBackoff` after a successful
@@ -73,6 +74,8 @@ final class SSEClient {
 
     func disconnect() {
         stopSSE()
+        baseURL = nil
+        token = nil
         state = .disconnected
     }
 
@@ -123,7 +126,10 @@ final class SSEClient {
     private func stopSSE() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
-        dataTask?.cancel()
+        if let dataTask {
+            ignoredCompletionTaskIds.insert(dataTask.taskIdentifier)
+            dataTask.cancel()
+        }
         dataTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
@@ -244,11 +250,17 @@ final class SSEClient {
         }
     }
 
-    fileprivate func handleSSEError(_ error: Error?) {
+    fileprivate func handleSSEError(_ error: Error?, taskIdentifier: Int) {
+        if ignoredCompletionTaskIds.remove(taskIdentifier) != nil {
+            return
+        }
         scheduleReconnect()
     }
 
-    fileprivate func handleSSEComplete() {
+    fileprivate func handleSSEComplete(taskIdentifier: Int) {
+        if ignoredCompletionTaskIds.remove(taskIdentifier) != nil {
+            return
+        }
         // Stream ended gracefully -- reconnect.
         scheduleReconnect()
     }
@@ -274,7 +286,7 @@ private final class SSESessionDelegate: NSObject, URLSessionDataDelegate {
             client?.handleSSEConnected()
             completionHandler(.allow)
         } else {
-            client?.handleSSEError(nil)
+            client?.handleSSEError(nil, taskIdentifier: dataTask.taskIdentifier)
             completionHandler(.cancel)
         }
     }
@@ -285,9 +297,9 @@ private final class SSESessionDelegate: NSObject, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
-            client?.handleSSEError(error)
+            client?.handleSSEError(error, taskIdentifier: task.taskIdentifier)
         } else {
-            client?.handleSSEComplete()
+            client?.handleSSEComplete(taskIdentifier: task.taskIdentifier)
         }
     }
 }
