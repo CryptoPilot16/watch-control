@@ -32,12 +32,12 @@ extension Color {
         self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 
-    // MARK: - Claude Watch brand colors
+    // MARK: - watch-control brand colors
 
-    /// Primary orange: #E87A35
-    static let claudeOrange = Color(hex: "E87A35")
+    /// Primary brand red (matches the `>_` mark in the app icon): #dc2626
+    static let claudeOrange = Color(hex: "dc2626")
 
-    /// Amber warning: #E8A735
+    /// Amber warning (kept for status indicators): #E8A735
     static let claudeAmber = Color(hex: "E8A735")
 
     /// Subtle text: #666666
@@ -52,6 +52,6 @@ extension Color {
     /// Success green: #34C759
     static let statusGreen = Color(hex: "34C759")
 
-    /// Connected pill background: #1a2233
-    static let connectedPillBackground = Color(hex: "1a2233")
+    /// Connected pill background (deep red, matches icon background gradient): #2a1010
+    static let connectedPillBackground = Color(hex: "2a1010")
 }

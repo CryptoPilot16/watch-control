@@ -5,12 +5,12 @@ import SwiftUI
 enum Theme {
     enum Background {
         static let primary = Color(hex: "000000")
-        static let capture = Color(hex: "1a2233")
+        static let capture = Color(hex: "2a1010")
         static let overlay = Color(hex: "1a1a1a")
     }
 
     enum Text {
-        static let primary = Color(hex: "E87A35")
+        static let primary = Color(hex: "dc2626")
         static let secondary = Color(hex: "666666")
         static let dimmed = Color(hex: "555555")
     }
