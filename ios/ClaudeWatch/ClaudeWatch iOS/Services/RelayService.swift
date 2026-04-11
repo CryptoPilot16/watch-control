@@ -211,6 +211,9 @@ final class RelayService: ObservableObject {
         case "permission-request":
             handlePermissionRequest(data)
 
+        case "permission-resolved":
+            handlePermissionResolved(data)
+
         case "session":
             handleSessionEvent(data)
 
@@ -321,6 +324,24 @@ final class RelayService: ObservableObject {
 
         // Notification if backgrounded
         notificationService.postApprovalNeeded(toolName: toolName, summary: description)
+    }
+
+    private func handlePermissionResolved(_ data: String) {
+        guard let json = parseJSON(data),
+              let permissionId = json["permissionId"] as? String else { return }
+
+        guard pendingPermission?.id == permissionId else { return }
+
+        let decision = json["decision"] as? [String: Any]
+        let behavior = decision?["behavior"] as? String ?? "deny"
+        let approved = behavior == "allow"
+        let line = TerminalLine(
+            text: approved ? "✓ Approved from watch" : "✗ Denied from watch",
+            type: approved ? .output : .error
+        )
+        terminalBuffer.append(line)
+        recentTerminalLines = terminalBuffer.getLast(15)
+        pendingPermission = nil
     }
 
     // MARK: - Permission response

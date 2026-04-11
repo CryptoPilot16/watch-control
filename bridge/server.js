@@ -127,7 +127,9 @@ function waitForPermission(permissionId) {
     const timer = setTimeout(() => {
       pendingPermissions.delete(permissionId);
       log("warn", `Permission ${permissionId} timed out, auto-denying`);
-      resolve({ behavior: "deny", reason: "Timed out" });
+      const decision = { behavior: "deny", reason: "Timed out" };
+      pushSseEvent("permission-resolved", { permissionId, decision });
+      resolve(decision);
     }, PERMISSION_TIMEOUT_MS);
     pendingPermissions.set(permissionId, { resolve, timer });
   });
@@ -138,6 +140,7 @@ function resolvePermission(permissionId, decision) {
   if (!pending) return false;
   clearTimeout(pending.timer);
   pendingPermissions.delete(permissionId);
+  pushSseEvent("permission-resolved", { permissionId, decision });
   pending.resolve(decision);
   return true;
 }
