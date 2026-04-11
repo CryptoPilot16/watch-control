@@ -16,7 +16,7 @@ struct OnboardingView: View {
         VStack(spacing: 6) {
             HStack(spacing: 4) {
                 ClaudeMascot(size: 16)
-                Text("WatchControl")
+                Text("watch-control")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(Theme.Text.primary)
             }

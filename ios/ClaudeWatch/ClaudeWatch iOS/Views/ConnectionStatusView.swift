@@ -60,7 +60,7 @@ struct ConnectionStatusView: View {
         HStack(spacing: 10) {
             ClaudeMascot(size: 32)
 
-            Text("Claude Watch")
+            Text("watch-control")
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.white)
 

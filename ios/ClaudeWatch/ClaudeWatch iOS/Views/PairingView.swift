@@ -45,7 +45,7 @@ struct PairingView: View {
 
     private var titleSection: some View {
         VStack(spacing: 8) {
-            Text("Claude Watch")
+            Text("watch-control")
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(Color.claudeOrange)
 

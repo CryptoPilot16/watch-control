@@ -129,8 +129,8 @@ struct ClaudeWatchComplication: Widget {
             ClaudeWatchRectangularView(entry: entry)
                 .containerBackground(Theme.Background.primary, for: .widget)
         }
-        .configurationDisplayName("Claude Watch")
-        .description("Shows Claude session status and latest output.")
+        .configurationDisplayName("watch-control")
+        .description("Shows Claude / Codex session status and latest output.")
         .supportedFamilies([.accessoryRectangular])
     }
 }
