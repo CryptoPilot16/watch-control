@@ -290,8 +290,11 @@ async function isTrackedHookRequest(body) {
   if (!hookPid) return false;
 
   const targets = await listAgentTargets();
+  const allowedTargetIds = new Set(syncMirrorTargetsWithTargets(targets));
   const processes = await listProcesses();
-  return targets.some((target) => isPidDescendantOfPane(hookPid, target.pid, processes));
+  return targets
+    .filter((target) => allowedTargetIds.has(target.id))
+    .some((target) => isPidDescendantOfPane(hookPid, target.pid, processes));
 }
 
 function ignoredHookResponse(res, reason) {
@@ -762,8 +765,8 @@ async function handleHookPermission(req, res) {
   let body;
   try { body = await readBody(req); } catch { return jsonResponse(res, 400, { error: "Invalid JSON" }); }
   if (!(await isTrackedHookRequest(body))) {
-    const reason = "watch-control ignored this hook because it is not from a tracked tmux Claude/Codex pane.";
-    log("info", "Ignoring untracked Claude hook", body.tool_name || "", body.watchcontrol_hook || {});
+    const reason = "watch-control ignored this hook because it is not from a mirrored tmux Claude/Codex pane.";
+    log("info", "Ignoring unmirrored Claude hook", body.tool_name || "", body.watchcontrol_hook || {});
     return ignoredHookResponse(res, reason);
   }
 
