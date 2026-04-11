@@ -22,51 +22,47 @@ struct OnboardingView: View {
                         .foregroundColor(Theme.Text.primary)
                 }
 
-                if bridgeURL != nil {
-                    Text("Pair code")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.Text.secondary)
+                Text("Bridge IP")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Text.secondary)
 
-                    TextField("000000", text: $code)
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
-                        .foregroundColor(Theme.Text.primary)
-                        .multilineTextAlignment(.center)
-                        .textContentType(.oneTimeCode)
-                        .focused($codeFocused)
-                        .onChange(of: code) { _, newValue in
-                            let filtered = String(newValue.filter { $0.isNumber }.prefix(6))
-                            if filtered != newValue { code = filtered }
-                            if filtered.count == 6 { submitCode(filtered) }
-                        }
+                TextField("100.x.x.x", text: $ipAddress)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.Text.primary)
+                    .multilineTextAlignment(.center)
+                    .focused($ipFocused)
 
-                    if isConnecting {
-                        ProgressView()
-                            .tint(Theme.Text.primary)
-                            .scaleEffect(0.7)
+                Text("Pair code")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.Text.secondary)
+
+                TextField("000000", text: $code)
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.Text.primary)
+                    .multilineTextAlignment(.center)
+                    .textContentType(.oneTimeCode)
+                    .focused($codeFocused)
+                    .onChange(of: code) { _, newValue in
+                        let filtered = String(newValue.filter { $0.isNumber }.prefix(6))
+                        if filtered != newValue { code = filtered }
                     }
 
-                } else {
-                    Text("Bridge IP")
-                        .font(.system(size: 11))
-                        .foregroundColor(Theme.Text.secondary)
+                Button { submitCode(code) } label: {
+                    Text("Pair")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(Theme.Text.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(ipAddress.isEmpty || code.count != 6 || isConnecting)
 
-                    TextField("100.x.x.x", text: $ipAddress)
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Theme.Text.primary)
-                        .multilineTextAlignment(.center)
-                        .focused($ipFocused)
-
-                    Button { connectManual() } label: {
-                        Text("Next")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 32)
-                            .background(Theme.Text.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(ipAddress.isEmpty)
+                if isConnecting {
+                    ProgressView()
+                        .tint(Theme.Text.primary)
+                        .scaleEffect(0.7)
                 }
 
                 if let error {
@@ -89,41 +85,41 @@ struct OnboardingView: View {
         }
     }
 
-    private func connectManual() {
+    private func connectManual() async -> URL? {
         let ip = ipAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ip.isEmpty else { return }
+        guard !ip.isEmpty else { return nil }
         UserDefaults.standard.set(ip, forKey: "bridge_host")
         error = nil
 
-        Task {
-            for port in 7860...7869 {
-                let url = URL(string: "http://\(ip):\(port)/status")!
-                var request = URLRequest(url: url)
-                request.timeoutInterval = 3
-                do {
-                    let (_, response) = try await URLSession.shared.data(for: request)
-                    if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                        await MainActor.run {
-                            bridgeURL = URL(string: "http://\(ip):\(port)")
-                            codeFocused = true
-                        }
-                        return
-                    }
-                } catch { continue }
-            }
-            await MainActor.run {
-                self.error = "Can't reach \(ip)"
+        for port in 7860...7869 {
+            let url = URL(string: "http://\(ip):\(port)/status")!
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 3
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                    return URL(string: "http://\(ip):\(port)")
+                }
+            } catch {
+                continue
             }
         }
+        return nil
     }
 
     private func submitCode(_ code: String) {
-        guard let url = bridgeURL, !isConnecting else { return }
+        guard !isConnecting else { return }
         isConnecting = true
         error = nil
 
         Task {
             do {
+                guard let url = await connectManual() else {
+                    throw WatchBridgeClient.BridgeError.network
+                }
+                await MainActor.run {
+                    bridgeURL = url
+                }
                 try await bridge.pair(baseURL: url, code: code)
                 await MainActor.run {
                     session.isPaired = true
