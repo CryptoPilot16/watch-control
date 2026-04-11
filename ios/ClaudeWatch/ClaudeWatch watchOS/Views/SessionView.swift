@@ -143,7 +143,7 @@ struct SessionView: View {
     private func terminalLine(_ line: TerminalLine) -> some View {
         Text(line.text)
             .font(.system(size: 11, design: .monospaced))
-            .foregroundColor(colorFor(line.type))
+            .foregroundColor(colorFor(line))
             .lineLimit(4)
             .truncationMode(.tail)
             .fixedSize(horizontal: false, vertical: true)
@@ -205,8 +205,13 @@ struct SessionView: View {
         }
     }
 
-    private func colorFor(_ type: TerminalLine.LineType) -> Color {
-        switch type {
+    private func colorFor(_ line: TerminalLine) -> Color {
+        if (line.type == .output || line.type == .command),
+           let colorHex = line.colorHex {
+            return Color(hex: colorHex)
+        }
+
+        switch line.type {
         case .output:   return Theme.Text.primary
         case .command:  return .white
         case .system:   return Theme.Text.secondary

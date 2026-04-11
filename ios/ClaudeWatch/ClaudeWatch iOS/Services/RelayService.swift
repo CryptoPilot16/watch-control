@@ -289,6 +289,8 @@ final class RelayService: ObservableObject {
     private func handlePtyOutput(_ data: String) {
         guard let json = parseJSON(data),
               let text = json["text"] as? String else { return }
+        let target = json["target"] as? String
+        let colorHex = colorForTarget(target)
 
         // Strip ANSI escape codes for display
         let cleaned = text.replacingOccurrences(
@@ -301,7 +303,7 @@ final class RelayService: ObservableObject {
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-            .map { TerminalLine(text: $0, type: .output) }
+            .map { TerminalLine(text: $0, type: .output, colorHex: colorHex) }
         guard !lines.isEmpty else { return }
 
         for line in lines {
@@ -659,6 +661,14 @@ final class RelayService: ObservableObject {
             return "\(target.id) \(target.title)"
         }
         return "\(target.id) \(target.command)"
+    }
+
+    private func colorForTarget(_ target: String?) -> String? {
+        if let target,
+           let color = terminalTargets.first(where: { $0.id == target })?.color {
+            return color
+        }
+        return terminalTargets.first(where: { $0.active })?.color
     }
 
     // MARK: - Terminal batching

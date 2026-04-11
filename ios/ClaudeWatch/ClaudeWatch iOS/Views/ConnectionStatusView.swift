@@ -449,8 +449,16 @@ struct ConnectionStatusView: View {
     private func terminalLineView(_ line: TerminalLine) -> some View {
         Text(line.text)
             .font(.system(size: 13, design: .monospaced))
-            .foregroundStyle(colorForLineType(line.type))
+            .foregroundStyle(colorForTerminalLine(line))
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func colorForTerminalLine(_ line: TerminalLine) -> Color {
+        if (line.type == .output || line.type == .command),
+           let colorHex = line.colorHex {
+            return Color(hex: colorHex)
+        }
+        return colorForLineType(line.type)
     }
 
     private func colorForLineType(_ type: TerminalLine.LineType) -> Color {
