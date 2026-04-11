@@ -1,9 +1,12 @@
 import SwiftUI
+import WatchKit
 
 struct SessionView: View {
     @EnvironmentObject private var session: WatchViewState
 
-    @State private var showVoiceInput = false
+    @State private var commandText = ""
+    @State private var commandError: String?
+    @State private var isDictating = false
     @State private var cursorVisible = true
     private let cursorTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
@@ -55,26 +58,68 @@ struct SessionView: View {
                 }
             }
 
-            Button { showVoiceInput = true } label: {
-                Label("Speak", systemImage: "mic.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.black)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 34)
-                    .background(Theme.Text.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 6)
-            .padding(.bottom, 4)
+            commandBar
         }
         .background(Theme.Background.primary)
         .sheet(item: $session.pendingApproval) { request in
             ApprovalView(request: request)
         }
-        .fullScreenCover(isPresented: $showVoiceInput) {
-            VoiceInputView()
+    }
+
+    private var commandBar: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                TextField("Type or speak", text: $commandText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.Text.primary)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .frame(height: 34)
+                    .background(Theme.Background.overlay)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onSubmit {
+                        sendCommand()
+                    }
+
+                Button {
+                    startDictation()
+                } label: {
+                    Image(systemName: isDictating ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(width: 34, height: 34)
+                        .background(isDictating ? Theme.Accent.error : Theme.Text.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(isDictating)
+            }
+
+            if let commandError {
+                Text(commandError)
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.Accent.error)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+
+            if !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    sendCommand()
+                } label: {
+                    Text("Send")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(Theme.Text.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 6)
+        .padding(.bottom, 4)
     }
 
     // Only render last 30 lines, skip empty/thinking lines
@@ -97,6 +142,42 @@ struct SessionView: View {
 
     private var isThinking: Bool {
         session.terminalLines.last?.type == .thinking
+    }
+
+    private func startDictation() {
+        guard !isDictating else { return }
+        guard let controller = WKExtension.shared().visibleInterfaceController else {
+            commandError = "Could not open dictation"
+            return
+        }
+
+        commandError = nil
+        isDictating = true
+        controller.presentTextInputController(
+            withSuggestions: nil,
+            allowedInputMode: .plain
+        ) { results in
+            DispatchQueue.main.async {
+                isDictating = false
+
+                guard let text = results?.compactMap({ $0 as? String }).first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !text.isEmpty
+                else { return }
+
+                commandText = text
+            }
+        }
+    }
+
+    private func sendCommand() {
+        let text = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        commandError = nil
+        HapticManager.commandSent()
+        session.sendVoiceCommand(text)
+        commandText = ""
     }
 
     private var statusColor: Color {
