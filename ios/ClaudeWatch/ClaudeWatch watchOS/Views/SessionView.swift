@@ -17,7 +17,13 @@ struct SessionView: View {
                 ClaudeMascot(size: 14)
                 Text("Claude")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(Theme.Text.primary)
+                    .foregroundColor(targetColor)
+                if let targetId = session.sessionState.targetId {
+                    Text(targetId)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(targetColor)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Circle()
                     .fill(statusColor)
@@ -69,9 +75,12 @@ struct SessionView: View {
     private var commandBar: some View {
         VStack(spacing: 4) {
             HStack(spacing: 6) {
+                Circle()
+                    .fill(targetColor)
+                    .frame(width: 8, height: 8)
                 TextField("Type or speak", text: $commandText)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Theme.Text.primary)
+                    .foregroundColor(targetColor)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 8)
                     .frame(height: 34)
@@ -88,7 +97,7 @@ struct SessionView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.black)
                         .frame(width: 34, height: 34)
-                        .background(isDictating ? Theme.Accent.error : Theme.Text.primary)
+                        .background(isDictating ? Theme.Accent.error : targetColor)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -112,7 +121,7 @@ struct SessionView: View {
                         .foregroundColor(.black)
                         .frame(maxWidth: .infinity)
                         .frame(height: 30)
-                        .background(Theme.Text.primary)
+                        .background(targetColor)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -142,6 +151,13 @@ struct SessionView: View {
 
     private var isThinking: Bool {
         session.terminalLines.last?.type == .thinking
+    }
+
+    private var targetColor: Color {
+        if let hex = session.sessionState.targetColor {
+            return Color(hex: hex)
+        }
+        return Theme.Text.primary
     }
 
     private func startDictation() {

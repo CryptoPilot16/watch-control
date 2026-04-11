@@ -27,6 +27,7 @@ const TMUX_MIRROR_HISTORY_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_
 const TMUX_MIRROR_EMIT_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_EMIT_LINES, 10) || 20;
 const MAX_AGENT_TARGETS = parseInt(process.env.WATCHCONTROL_MAX_TARGETS, 10) || 4;
 const AGENT_COMMAND_RE = /^(claude|codex)$/;
+const TARGET_COLORS = ["dc2626", "0ea5e9", "22c55e", "e8a735"];
 
 const sessionTokens = new Set();
 let pairingCode = null;
@@ -147,7 +148,8 @@ async function listAgentTargets() {
       return { id, command: command.toLowerCase(), path, title };
     })
     .filter((pane) => AGENT_COMMAND_RE.test(pane.command))
-    .slice(0, MAX_AGENT_TARGETS);
+    .slice(0, MAX_AGENT_TARGETS)
+    .map((pane, index) => ({ ...pane, color: TARGET_COLORS[index % TARGET_COLORS.length] }));
 }
 
 async function setActiveCommandTarget(target) {

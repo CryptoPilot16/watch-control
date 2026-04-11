@@ -221,6 +221,7 @@ final class RelayService: ObservableObject {
             let response = try await bridgeClient.fetchTargets()
             terminalTargets = response.targets
             activeTerminalTarget = response.activeTarget
+            updateWatchState()
         } catch {
             print("[RelayService] Failed to refresh targets: \(error)")
         }
@@ -617,6 +618,7 @@ final class RelayService: ObservableObject {
     }
 
     private func updateWatchState() {
+        let activeTarget = terminalTargets.first(where: { $0.active })
         let state = SessionState(
             connection: connectionState,
             activity: currentActivity,
@@ -626,7 +628,10 @@ final class RelayService: ObservableObject {
             elapsedSeconds: elapsedSeconds,
             filesChanged: 0,
             linesAdded: 0,
-            transportMode: .lan
+            transportMode: .lan,
+            targetId: activeTarget?.id ?? activeTerminalTarget,
+            targetTitle: activeTarget.map(targetLabel),
+            targetColor: activeTarget?.color
         )
 
         sessionManager.updateApplicationContext(with: state)

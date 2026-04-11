@@ -24,10 +24,41 @@ struct SessionState: Codable {
     var filesChanged: Int
     var linesAdded: Int
     var transportMode: TransportMode
+    var targetId: String?
+    var targetTitle: String?
+    var targetColor: String?
 
     enum TransportMode: String, Codable {
         case lan
         case remote
+    }
+
+    init(
+        connection: ConnectionState,
+        activity: SessionActivity,
+        machineName: String? = nil,
+        modelName: String? = nil,
+        workingDirectory: String? = nil,
+        elapsedSeconds: Int,
+        filesChanged: Int,
+        linesAdded: Int,
+        transportMode: TransportMode,
+        targetId: String? = nil,
+        targetTitle: String? = nil,
+        targetColor: String? = nil
+    ) {
+        self.connection = connection
+        self.activity = activity
+        self.machineName = machineName
+        self.modelName = modelName
+        self.workingDirectory = workingDirectory
+        self.elapsedSeconds = elapsedSeconds
+        self.filesChanged = filesChanged
+        self.linesAdded = linesAdded
+        self.transportMode = transportMode
+        self.targetId = targetId
+        self.targetTitle = targetTitle
+        self.targetColor = targetColor
     }
 
     static var disconnected: SessionState {

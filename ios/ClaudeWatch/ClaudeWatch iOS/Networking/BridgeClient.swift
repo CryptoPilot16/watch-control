@@ -5,6 +5,7 @@ struct BridgeTarget: Identifiable, Decodable, Equatable {
     let command: String
     let path: String
     let title: String
+    let color: String
     let active: Bool
 }
 

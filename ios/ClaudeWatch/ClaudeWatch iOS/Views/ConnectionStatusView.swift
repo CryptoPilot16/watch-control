@@ -170,6 +170,9 @@ struct ConnectionStatusView: View {
             }
         } label: {
             HStack(spacing: 6) {
+                Circle()
+                    .fill(activeTargetColor)
+                    .frame(width: 10, height: 10)
                 Image(systemName: "terminal")
                     .font(.system(size: 11))
                 Text(activeTargetLabel)
@@ -183,7 +186,7 @@ struct ConnectionStatusView: View {
             .foregroundStyle(Color.subtleText)
             .padding(.horizontal, 10)
             .frame(height: 34)
-            .background(Color.black.opacity(0.35))
+            .background(activeTargetColor.opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -496,6 +499,13 @@ struct ConnectionStatusView: View {
             return target
         }
         return "No Claude session"
+    }
+
+    private var activeTargetColor: Color {
+        if let active = relayService.terminalTargets.first(where: { $0.active }) {
+            return Color(hex: active.color)
+        }
+        return Color.subtleText
     }
 
     private func targetMenuLabel(_ target: BridgeTarget) -> String {
