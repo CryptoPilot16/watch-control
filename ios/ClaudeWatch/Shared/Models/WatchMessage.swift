@@ -10,6 +10,8 @@ enum WatchMessage: Codable {
     // Watch -> iPhone
     case voiceCommand(VoiceCommand)
     case voiceAudioCommand(VoiceAudioCommand)
+    case pasteRequest(PasteRequest)
+    case pasteResponse(PasteResponse)
     case commandStatus(CommandStatus)
     case approvalResponse(ApprovalResponse)
 
@@ -52,6 +54,26 @@ enum WatchMessage: Codable {
     struct CommandStatus: Codable {
         let message: String
         let isError: Bool
+    }
+
+    struct PasteRequest: Codable {
+        let id: UUID
+        let timestamp: Date
+
+        init() {
+            self.id = UUID()
+            self.timestamp = Date()
+        }
+    }
+
+    struct PasteResponse: Codable {
+        let text: String?
+        let error: String?
+
+        init(text: String? = nil, error: String? = nil) {
+            self.text = text
+            self.error = error
+        }
     }
 
     struct ApprovalResponse: Codable {
@@ -97,6 +119,8 @@ enum WatchMessage: Codable {
         switch self {
         case .voiceCommand:           return "voiceCommand"
         case .voiceAudioCommand:      return "voiceAudioCommand"
+        case .pasteRequest:           return "pasteRequest"
+        case .pasteResponse:          return "pasteResponse"
         case .commandStatus:          return "commandStatus"
         case .approvalResponse:       return "approvalResponse"
         case .terminalUpdate:         return "terminalUpdate"
@@ -145,6 +169,10 @@ enum WatchMessage: Codable {
             try container.encode(cmd, forKey: .payload)
         case .voiceAudioCommand(let cmd):
             try container.encode(cmd, forKey: .payload)
+        case .pasteRequest(let req):
+            try container.encode(req, forKey: .payload)
+        case .pasteResponse(let resp):
+            try container.encode(resp, forKey: .payload)
         case .commandStatus(let status):
             try container.encode(status, forKey: .payload)
         case .approvalResponse(let resp):
@@ -169,6 +197,10 @@ enum WatchMessage: Codable {
             self = .voiceCommand(try container.decode(VoiceCommand.self, forKey: .payload))
         case "voiceAudioCommand":
             self = .voiceAudioCommand(try container.decode(VoiceAudioCommand.self, forKey: .payload))
+        case "pasteRequest":
+            self = .pasteRequest(try container.decode(PasteRequest.self, forKey: .payload))
+        case "pasteResponse":
+            self = .pasteResponse(try container.decode(PasteResponse.self, forKey: .payload))
         case "commandStatus":
             self = .commandStatus(try container.decode(CommandStatus.self, forKey: .payload))
         case "approvalResponse":

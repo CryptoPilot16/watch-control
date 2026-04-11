@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Speech
+import UIKit
 
 /// Coordinates communication between the bridge server, SSE event stream,
 /// and the Apple Watch via WCSession.
@@ -649,6 +650,12 @@ final class RelayService: ObservableObject {
                 await handleWatchAudioCommand(cmd)
             }
 
+        case .pasteRequest:
+            sendPasteResponseToWatch()
+
+        case .pasteResponse, .commandStatus:
+            break
+
         case .approvalResponse(let response):
             // Forward approval response to bridge
             let key = "pending_permission_\(response.requestId.uuidString)"
@@ -739,6 +746,17 @@ final class RelayService: ObservableObject {
 
     private func sendCommandStatus(_ message: String, isError: Bool = false) {
         sessionManager.send(.commandStatus(WatchMessage.CommandStatus(message: message, isError: isError)))
+    }
+
+    private func sendPasteResponseToWatch() {
+        let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let response: WatchMessage.PasteResponse
+        if let text, !text.isEmpty {
+            response = WatchMessage.PasteResponse(text: text)
+        } else {
+            response = WatchMessage.PasteResponse(error: "Clipboard is empty")
+        }
+        sessionManager.send(.pasteResponse(response))
     }
 
     private func updateWatchState() {

@@ -47,6 +47,11 @@ struct SessionView: View {
         .sheet(item: $session.pendingApproval) { request in
             ApprovalView(request: request)
         }
+        .onChange(of: session.pastedCommandText) { _, pastedText in
+            guard let pastedText else { return }
+            commandText = pastedText
+            session.pastedCommandText = nil
+        }
         .onDisappear {
             audioRecorder.cancel()
         }
@@ -69,6 +74,18 @@ struct SessionView: View {
                     .onSubmit {
                         sendCommand()
                     }
+
+                Button {
+                    session.requestPaste()
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(width: 34, height: 34)
+                        .background(targetColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
 
                 Button {
                     toggleRecording()

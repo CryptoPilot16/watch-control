@@ -12,6 +12,7 @@ class WatchViewState: ObservableObject {
     @Published var taskCompleteSummary: String? = nil
     @Published var isReachable: Bool = false
     @Published var selectedTerminalTarget: String?
+    @Published var pastedCommandText: String?
 
     private let bridge = WatchBridgeClient.shared
     private let sessionManager = WatchSessionManager.shared
@@ -75,6 +76,15 @@ class WatchViewState: ObservableObject {
             companionRelayActive = true
             appendLine(TerminalLine(text: status.message, type: status.isError ? .error : .system))
 
+        case .pasteResponse(let response):
+            companionRelayActive = true
+            if let text = response.text, !text.isEmpty {
+                pastedCommandText = text
+                appendLine(TerminalLine(text: "Pasted from iPhone", type: .system, targetId: selectedTerminalTarget))
+            } else {
+                appendLine(TerminalLine(text: response.error ?? "Paste failed", type: .error, targetId: selectedTerminalTarget))
+            }
+
         case .approvalRequestMessage(let request):
             companionRelayActive = true
             isPaired = true
@@ -89,7 +99,7 @@ class WatchViewState: ObservableObject {
             isPaired = status.state != .disconnected
             isReachable = status.state == .connected
 
-        case .voiceCommand, .voiceAudioCommand, .approvalResponse:
+        case .voiceCommand, .voiceAudioCommand, .pasteRequest, .approvalResponse, .pasteResponse:
             break
         }
     }
@@ -143,6 +153,14 @@ class WatchViewState: ObservableObject {
 
     func selectTerminalPage(_ targetId: String) {
         selectedTerminalTarget = targetId
+    }
+
+    func requestPaste() {
+        guard companionRelayActive else {
+            appendLine(TerminalLine(text: "Open iPhone app to paste", type: .error, targetId: selectedTerminalTarget))
+            return
+        }
+        sessionManager.send(.pasteRequest(WatchMessage.PasteRequest()))
     }
 
     // MARK: - Event stream (SSE from bridge)

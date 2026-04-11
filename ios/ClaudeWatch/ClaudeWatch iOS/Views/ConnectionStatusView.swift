@@ -1,6 +1,7 @@
 import SwiftUI
 import Speech
 import AVFoundation
+import UIKit
 
 struct ConnectionStatusView: View {
 
@@ -253,6 +254,19 @@ struct ConnectionStatusView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(speechService.isRecording ? "Stop dictation" : "Start dictation")
+
+                    Button {
+                        pasteCommandFromClipboard()
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 48, height: 48)
+                            .background(Color.fieldBorder)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Paste command")
                 }
 
                 Text(speechService.isRecording ? "Listening..." : "Tap the mic to speak")
@@ -332,6 +346,16 @@ struct ConnectionStatusView: View {
         commandError = nil
         isCommandFieldFocused = false
         speechService.toggleRecording()
+    }
+
+    private func pasteCommandFromClipboard() {
+        commandError = nil
+        guard let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else {
+            commandError = "Clipboard is empty"
+            return
+        }
+        commandText = text
     }
 
     private var canSendCommand: Bool {
