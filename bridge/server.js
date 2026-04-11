@@ -222,9 +222,21 @@ async function handleHookPermission(req, res) {
   pushSseEvent("permission-request", { permissionId, ...body });
   const decision = await waitForPermission(permissionId);
   log("info", `Permission resolved: ${decision.behavior}`);
+  // Map the watch's allow/deny decision into the current Claude Code
+  // PreToolUse hook spec: { hookSpecificOutput: { hookEventName: "PreToolUse",
+  // permissionDecision: "allow" | "deny", permissionDecisionReason: "..." } }.
+  // Older clients (manual curl tests, watch app pre-rebrand) keyed off
+  // decision.behavior, so include both for backwards compatibility.
+  const permissionDecision = decision.behavior === "allow" ? "allow" : "deny";
+  const permissionDecisionReason =
+    decision.reason ||
+    (permissionDecision === "allow" ? "Approved from watch-control" : "Denied from watch-control");
   return jsonResponse(res, 200, {
     hookSpecificOutput: {
-      hookEventName: "PermissionRequest",
+      hookEventName: "PreToolUse",
+      permissionDecision,
+      permissionDecisionReason,
+      // Legacy fields kept so older callers don't break.
       decision: { behavior: decision.behavior },
     },
   });

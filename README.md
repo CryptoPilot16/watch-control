@@ -159,25 +159,34 @@ Auth via `?secret=<APPROVE_SECRET>` query param or `X-Secret` header.
 
 ## Claude Code hooks setup
 
-Add to `~/.claude/settings.json` so Claude Code POSTs to the bridge directly:
+watch-control ships with a ready-to-use **PreToolUse** hook script at [`hooks/claude-code-permission.sh`](hooks/claude-code-permission.sh). It reads the tool-use payload from stdin, POSTs it to the bridge, blocks until you tap Approve/Deny on your watch (or iPhone), and returns the decision in the format Claude Code expects.
+
+Add the following to `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
-    "PermissionRequest": [
-      { "command": "curl -s -X POST http://100.x.x.x:7860/hooks/permission -H 'Content-Type: application/json' -d @-" }
-    ],
-    "PostToolUse": [
-      { "command": "curl -s -X POST http://100.x.x.x:7860/hooks/tool-output -H 'Content-Type: application/json' -d @-" }
-    ],
-    "Stop": [
-      { "command": "curl -s -X POST http://100.x.x.x:7860/hooks/stop -H 'Content-Type: application/json' -d @-" }
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/opt/watchcontrol/hooks/claude-code-permission.sh",
+            "timeout": 600
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Replace the Tailscale IP with your bridge server's address.
+The `matcher` is a regex of tool names to gate behind the watch. The default matches the destructive tools (Bash, Edit, Write, MultiEdit) and lets read-only ones (Read, Glob, Grep) pass through without prompting. Adjust to taste — `".*"` gates everything, `"Bash"` gates only shell commands.
+
+The hook reads `WATCHCONTROL_BRIDGE_URL` from the environment if you need to point at a different bridge instance (defaults to `http://127.0.0.1:7860`). If the bridge is unreachable, the hook returns `permissionDecision: "ask"` so you fall back to Claude Code's interactive prompt instead of being silently blocked.
+
+You can also opt in to streaming tool output and stop notifications to the watch by adding `PostToolUse` and `Stop` hooks that POST to `/hooks/tool-output` and `/hooks/stop` respectively (see the bridge endpoints table above).
 
 ---
 
