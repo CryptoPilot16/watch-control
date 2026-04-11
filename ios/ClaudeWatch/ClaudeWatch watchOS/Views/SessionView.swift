@@ -130,6 +130,10 @@ struct SessionView: View {
                             .onReceive(cursorTimer) { _ in cursorVisible.toggle() }
                             .id("cursor-\(page.id)")
                     }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom-\(page.id)")
                 }
                 .padding(.horizontal, 4)
                 .padding(.bottom, session.terminalPages.count > 1 ? 6 : 0)
@@ -137,6 +141,9 @@ struct SessionView: View {
             }
             .onChange(of: session.terminalLines.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.1)) {
+                    scrollToBottom(proxy, pageId: page.id)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     scrollToBottom(proxy, pageId: page.id)
                 }
             }
@@ -169,11 +176,7 @@ struct SessionView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, pageId: String) {
-        if isThinking(on: pageId) {
-            proxy.scrollTo("cursor-\(pageId)", anchor: .bottom)
-        } else if let last = visibleLines(for: pageId).last {
-            proxy.scrollTo(last.id, anchor: .bottom)
-        }
+        proxy.scrollTo("bottom-\(pageId)", anchor: .bottom)
     }
 
     private func isThinking(on targetId: String) -> Bool {

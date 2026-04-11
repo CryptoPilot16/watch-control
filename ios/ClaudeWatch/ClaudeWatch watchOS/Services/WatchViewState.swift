@@ -24,6 +24,7 @@ class WatchViewState: ObservableObject {
     private var sseTask: URLSessionDataTask?
     private var companionRelayActive = false
     private var relayStatusTargetId: String?
+    private var seenTerminalLineIds = Set<UUID>()
 
     private init() {
         setupCompanionRelay()
@@ -35,7 +36,9 @@ class WatchViewState: ObservableObject {
                 await MainActor.run {
                     if reachable {
                         isPaired = true
-                        startEventStream()
+                        if shouldUseDirectEventStream {
+                            startEventStream()
+                        }
                     } else {
                         // Bridge unreachable — clear stale credentials
                         bridge.unpair()
@@ -59,6 +62,7 @@ class WatchViewState: ObservableObject {
         switch message {
         case .sessionStateUpdate(let state):
             companionRelayActive = true
+            stopEventStream()
             sessionState = state
             syncSelectedTerminalTarget(with: state)
             isPaired = state.connection != .disconnected
@@ -69,6 +73,7 @@ class WatchViewState: ObservableObject {
 
         case .terminalUpdate(let update):
             companionRelayActive = true
+            stopEventStream()
             isPaired = true
             isReachable = true
             for line in update.lines {
@@ -81,13 +86,11 @@ class WatchViewState: ObservableObject {
 
         case .bridgeCredentials(let credentials):
             companionRelayActive = true
+            stopEventStream()
             if let url = URL(string: credentials.baseURL) {
                 bridge.setCredentials(baseURL: url, token: credentials.token)
                 isPaired = true
                 isReachable = true
-                if sseTask == nil {
-                    startEventStream()
-                }
             }
 
         case .pasteResponse(let response):
@@ -108,6 +111,7 @@ class WatchViewState: ObservableObject {
 
         case .connectionStatus(let status):
             companionRelayActive = true
+            stopEventStream()
             sessionState.connection = status.state
             sessionState.machineName = status.machineName
             isPaired = status.state != .disconnected
@@ -136,8 +140,13 @@ class WatchViewState: ObservableObject {
 
     func appendLine(_ line: TerminalLine) {
         DispatchQueue.main.async {
+            guard self.seenTerminalLineIds.insert(line.id).inserted else { return }
             self.terminalLines.append(line)
             if self.terminalLines.count > self.maxLines {
+                let removed = self.terminalLines.prefix(self.terminalLines.count - self.maxLines)
+                for oldLine in removed {
+                    self.seenTerminalLineIds.remove(oldLine.id)
+                }
                 self.terminalLines.removeFirst(self.terminalLines.count - self.maxLines)
             }
         }
@@ -160,7 +169,12 @@ class WatchViewState: ObservableObject {
 
     func terminalLines(for targetId: String) -> [TerminalLine] {
         terminalLines
-            .filter { $0.targetId == nil || $0.targetId == targetId }
+            .filter { line in
+                if let lineTargetId = line.targetId {
+                    return lineTargetId == targetId
+                }
+                return line.type == .system || line.type == .error
+            }
             .suffix(30)
             .map { $0 }
     }
@@ -189,6 +203,7 @@ class WatchViewState: ObservableObject {
     // MARK: - Event stream (SSE from bridge)
 
     func startEventStream() {
+        guard shouldUseDirectEventStream else { return }
         guard let baseURL = bridge.baseURL, let token = bridge.token else { return }
 
         let url = baseURL.appendingPathComponent("events")
@@ -215,6 +230,10 @@ class WatchViewState: ObservableObject {
     func stopEventStream() {
         sseTask?.cancel()
         sseTask = nil
+    }
+
+    var shouldUseDirectEventStream: Bool {
+        isPaired && !companionRelayActive
     }
 
     // MARK: - SSE parsing
@@ -477,6 +496,7 @@ class WatchViewState: ObservableObject {
         bridge.unpair()
         isPaired = false
         terminalLines = []
+        seenTerminalLineIds = []
         pendingApproval = nil
         isStreaming = false
         sessionState = .disconnected
@@ -580,7 +600,7 @@ private class SSEDelegate: NSObject, URLSessionDataDelegate {
 
         // Reconnect after 3 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let owner = self?.owner, owner.isPaired else { return }
+            guard let owner = self?.owner, owner.shouldUseDirectEventStream else { return }
             owner.startEventStream()
         }
     }
