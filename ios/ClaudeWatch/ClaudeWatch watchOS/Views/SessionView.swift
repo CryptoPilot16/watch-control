@@ -117,7 +117,7 @@ struct SessionView: View {
         let lines = visibleLines(for: page.id)
         let latestLineId = lines.last?.id
 
-        ScrollViewReader { proxy in
+        return ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(lines) { line in
