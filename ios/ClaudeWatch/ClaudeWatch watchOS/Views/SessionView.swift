@@ -9,6 +9,9 @@ struct SessionView: View {
     @State private var commandText = ""
     @State private var commandError: String?
     @State private var cursorVisible = true
+    @State private var isPressingActionButton = false
+    @State private var isStartingRecording = false
+    @State private var longPressTask: Task<Void, Never>?
     private let cursorTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -53,6 +56,9 @@ struct SessionView: View {
             session.pastedCommandText = nil
         }
         .onDisappear {
+            longPressTask?.cancel()
+            isPressingActionButton = false
+            isStartingRecording = false
             audioRecorder.cancel()
         }
     }
@@ -75,42 +81,7 @@ struct SessionView: View {
                         sendCommand()
                     }
 
-                Button {
-                    session.requestPaste()
-                } label: {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                        .background(targetColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    toggleRecording()
-                } label: {
-                    Image(systemName: audioRecorder.isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                        .background(audioRecorder.isRecording ? Theme.Accent.error : targetColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    sendCommand()
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(width: 34, height: 34)
-                        .background(canSendTypedCommand ? targetColor : Theme.Text.dimmed)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSendTypedCommand)
+                actionButton
             }
 
             if let statusText = commandStatusText {
@@ -123,6 +94,25 @@ struct SessionView: View {
         }
         .padding(.horizontal, 6)
         .padding(.bottom, 4)
+    }
+
+    private var actionButton: some View {
+        Image(systemName: actionButtonIcon)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(.black)
+            .frame(width: 34, height: 34)
+            .background(actionButtonColor)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        beginActionPress()
+                    }
+                    .onEnded { _ in
+                        endActionPress()
+                    }
+            )
     }
 
     private func terminalPage(_ page: TerminalPage) -> some View {
@@ -203,32 +193,85 @@ struct SessionView: View {
             return commandError
         }
         if audioRecorder.isRecording {
-            return "Listening... tap stop to send"
+            return "Listening... release to send"
+        }
+        if isStartingRecording {
+            return "Starting mic..."
         }
         return nil
+    }
+
+    private var actionButtonIcon: String {
+        if audioRecorder.isRecording {
+            return "stop.fill"
+        }
+        return canSendTypedCommand ? "paperplane.fill" : "mic.fill"
+    }
+
+    private var actionButtonColor: Color {
+        if audioRecorder.isRecording {
+            return Theme.Accent.error
+        }
+        return canSendTypedCommand ? targetColor : Theme.Text.dimmed
     }
 
     private var canSendTypedCommand: Bool {
         !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func toggleRecording() {
+    private func beginActionPress() {
+        guard !isPressingActionButton else { return }
         commandError = nil
-        if audioRecorder.isRecording {
-            guard let audioData = audioRecorder.stop() else {
-                commandError = audioRecorder.error ?? "Could not capture audio"
-                return
-            }
-            HapticManager.commandSent()
-            session.sendAudioCommand(audioData)
-        } else {
-            Task {
-                let started = await audioRecorder.start()
-                if !started {
-                    commandError = audioRecorder.error ?? "Could not start microphone"
-                }
+        isPressingActionButton = true
+        longPressTask?.cancel()
+        longPressTask = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard isPressingActionButton, !audioRecorder.isRecording else { return }
+                startRecording()
             }
         }
+    }
+
+    private func endActionPress() {
+        guard isPressingActionButton else { return }
+        isPressingActionButton = false
+        longPressTask?.cancel()
+        longPressTask = nil
+
+        if audioRecorder.isRecording {
+            stopAndSendRecording()
+        } else if isStartingRecording {
+            commandError = nil
+        } else if canSendTypedCommand {
+            sendCommand()
+        } else {
+            commandError = "Hold to speak"
+        }
+    }
+
+    private func startRecording() {
+        commandError = nil
+        isStartingRecording = true
+        Task {
+            let started = await audioRecorder.start()
+            isStartingRecording = false
+            if !started {
+                commandError = audioRecorder.error ?? "Could not start microphone"
+            } else if !isPressingActionButton {
+                stopAndSendRecording()
+            }
+        }
+    }
+
+    private func stopAndSendRecording() {
+        guard let audioData = audioRecorder.stop() else {
+            commandError = audioRecorder.error ?? "Could not capture audio"
+            return
+        }
+        HapticManager.commandSent()
+        session.sendAudioCommand(audioData)
     }
 
     private func sendCommand() {
