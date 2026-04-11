@@ -228,20 +228,27 @@ function startTmuxMirror() {
 }
 
 async function sendTmuxSnapshot(client) {
-  const target = await resolveCommandTarget(tmuxMirrorTarget);
-  tmuxMirrorTarget = target;
-  const stdout = await captureTmuxPane(target);
-  const nextLines = normalizeTmuxCapture(stdout);
-  tmuxMirrorLines = nextLines;
-  tmuxMirrorActive = true;
-  tmuxMirrorLastError = null;
-  const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
-  if (!snapshot.length) return;
+  if (tmuxMirrorBusy) return;
 
-  client.write(formatSseMessage({
-    event: "pty-output",
-    data: JSON.stringify({ text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target }),
-  }));
+  tmuxMirrorBusy = true;
+  try {
+    const target = await resolveCommandTarget(tmuxMirrorTarget);
+    tmuxMirrorTarget = target;
+    const stdout = await captureTmuxPane(target);
+    const nextLines = normalizeTmuxCapture(stdout);
+    tmuxMirrorLines = nextLines;
+    tmuxMirrorActive = true;
+    tmuxMirrorLastError = null;
+    const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
+    if (!snapshot.length) return;
+
+    client.write(formatSseMessage({
+      event: "pty-output",
+      data: JSON.stringify({ text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target }),
+    }));
+  } finally {
+    tmuxMirrorBusy = false;
+  }
 }
 
 function pushSseEvent(event, data) {
