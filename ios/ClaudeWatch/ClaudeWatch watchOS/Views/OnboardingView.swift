@@ -55,9 +55,23 @@ struct OnboardingView: View {
                     .multilineTextAlignment(.center)
                     .padding(.vertical, 6)
 
-                ProgressView()
-                    .tint(Theme.Text.primary)
-                    .scaleEffect(0.7)
+                TextField("100.x.x.x", text: $ipAddress)
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.Text.primary)
+                    .multilineTextAlignment(.center)
+                    .focused($ipFocused)
+
+                Button { connectManual() } label: {
+                    Text("Direct setup")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(Theme.Text.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(ipAddress.isEmpty)
             }
 
             if let error {
@@ -75,7 +89,6 @@ struct OnboardingView: View {
             if let saved = UserDefaults.standard.string(forKey: "bridge_host"), !saved.isEmpty {
                 ipAddress = saved
             }
-            ipFocused = false
         }
     }
 

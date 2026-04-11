@@ -21,7 +21,7 @@ const SSE_BUFFER_SIZE = 500;
 const PERMISSION_TIMEOUT_MS = 600_000;
 const SESSION_ID = crypto.randomUUID();
 
-let sessionToken = null;
+const sessionTokens = new Set();
 let pairingCode = null;
 let pairingCodeExpiresAt = 0;
 let rateLimitAttempts = 0;
@@ -43,7 +43,7 @@ function generatePairingCode() {
 
 function generateSessionToken() {
   const token = crypto.randomBytes(32).toString("hex");
-  sessionToken = token;
+  sessionTokens.add(token);
   return token;
 }
 
@@ -69,7 +69,7 @@ function requireAuth(req) {
   const auth = req.headers["authorization"];
   if (!auth || !auth.startsWith("Bearer ")) return false;
   const token = auth.slice(7);
-  return token === sessionToken && sessionToken !== null;
+  return sessionTokens.has(token);
 }
 
 function jsonResponse(res, status, body) {
@@ -286,6 +286,7 @@ function handleStatus(_req, res) {
     sessionId: SESSION_ID,
     hasPty: false,
     sseClients: sseClients.size,
+    pairedClients: sessionTokens.size,
     pendingPermissions: pendingPermissions.size,
     eventBufferSize: sseBuffer.length,
   });
