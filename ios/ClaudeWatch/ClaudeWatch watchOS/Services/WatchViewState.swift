@@ -22,7 +22,23 @@ class WatchViewState: ObservableObject {
 
     private init() {
         setupCompanionRelay()
-        bridge.unpair()
+
+        // Verify saved credentials by checking the bridge
+        if bridge.isPaired {
+            Task {
+                let reachable = await verifyBridge()
+                await MainActor.run {
+                    if reachable {
+                        isPaired = true
+                        startEventStream()
+                    } else {
+                        // Bridge unreachable — clear stale credentials
+                        bridge.unpair()
+                        isPaired = false
+                    }
+                }
+            }
+        }
     }
 
     private func setupCompanionRelay() {
