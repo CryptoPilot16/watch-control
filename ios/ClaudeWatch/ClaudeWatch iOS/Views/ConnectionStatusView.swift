@@ -8,6 +8,11 @@ struct ConnectionStatusView: View {
 
     @State private var showSettings = false
     @State private var showBackgroundBanner = false
+    @State private var showCommandInput = false
+    @State private var commandText = ""
+    @State private var commandError: String?
+    @State private var isSendingCommand = false
+    @FocusState private var isCommandFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -22,6 +27,7 @@ struct ConnectionStatusView: View {
                     }
 
                     statusCard
+                    commandButton
                     terminalOutput
                     Spacer()
                     if showBackgroundBanner {
@@ -45,6 +51,9 @@ struct ConnectionStatusView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
                     .environmentObject(relayService)
+            }
+            .sheet(isPresented: $showCommandInput) {
+                commandInputSheet
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -141,6 +150,124 @@ struct ConnectionStatusView: View {
         .padding(16)
         .background(Color.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Command input
+
+    private var commandButton: some View {
+        Button {
+            commandError = nil
+            showCommandInput = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "mic.fill")
+                Text("Command")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text("type or speak")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            .background(Color.claudeOrange)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSendCommand)
+        .opacity(canSendCommand ? 1 : 0.5)
+    }
+
+    private var commandInputSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Tell Claude what to do")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+
+                TextField("Say it or type it", text: $commandText, axis: .vertical)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+                    .lineLimit(3...6)
+                    .padding(12)
+                    .background(Color.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .focused($isCommandFieldFocused)
+                    .submitLabel(.send)
+                    .onSubmit {
+                        sendCommandFromSheet()
+                    }
+
+                if let commandError {
+                    Text(commandError)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.red)
+                }
+
+                Button {
+                    sendCommandFromSheet()
+                } label: {
+                    Text(isSendingCommand ? "Sending..." : "Send")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(Color.statusGreen)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingCommand)
+
+                Spacer()
+            }
+            .padding(20)
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Command")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") {
+                        showCommandInput = false
+                    }
+                    .foregroundStyle(Color.subtleText)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    isCommandFieldFocused = true
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func sendCommandFromSheet() {
+        let command = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, !isSendingCommand else { return }
+
+        commandError = nil
+        isSendingCommand = true
+
+        Task {
+            do {
+                try await relayService.sendCommand(command)
+                commandText = ""
+                showCommandInput = false
+            } catch {
+                commandError = error.localizedDescription
+            }
+            isSendingCommand = false
+        }
+    }
+
+    private var canSendCommand: Bool {
+        guard relayService.isPaired else { return false }
+        if case .connected = relayService.connectionState {
+            return true
+        }
+        return false
     }
 
     // MARK: - Permission prompt

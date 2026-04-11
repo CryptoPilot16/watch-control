@@ -390,6 +390,25 @@ final class RelayService: ObservableObject {
         }
     }
 
+    // MARK: - Commands
+
+    func sendCommand(_ text: String) async throws {
+        let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+
+        terminalBuffer.append(TerminalLine(text: "> \(command)", type: .command))
+        recentTerminalLines = terminalBuffer.getLast(15)
+
+        do {
+            try await bridgeClient.sendCommand(text: command + "\n")
+        } catch {
+            let message = error.localizedDescription
+            terminalBuffer.append(TerminalLine(text: "Command failed: \(message)", type: .error))
+            recentTerminalLines = terminalBuffer.getLast(15)
+            throw error
+        }
+    }
+
     private func handleSessionEvent(_ data: String) {
         guard let json = parseJSON(data),
               let state = json["state"] as? String else { return }
@@ -529,7 +548,7 @@ final class RelayService: ObservableObject {
         case .voiceCommand(let cmd):
             // Forward voice command to bridge as PTY input
             Task {
-                try? await bridgeClient.sendCommand(text: cmd.transcribedText + "\n")
+                try? await sendCommand(cmd.transcribedText)
             }
 
         case .approvalResponse(let response):
