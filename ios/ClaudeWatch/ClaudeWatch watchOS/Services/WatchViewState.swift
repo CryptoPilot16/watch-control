@@ -13,12 +13,16 @@ class WatchViewState: ObservableObject {
     @Published var isReachable: Bool = false
 
     private let bridge = WatchBridgeClient.shared
+    private let sessionManager = WatchSessionManager.shared
     private let maxLines = 200
     private var pollTimer: Timer?
     private var lastEventId: Int = 0
     private var sseTask: URLSessionDataTask?
+    private var companionRelayActive = false
 
     private init() {
+        setupCompanionRelay()
+
         // Verify saved credentials by checking the bridge
         if bridge.isPaired {
             Task {
@@ -34,6 +38,53 @@ class WatchViewState: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    private func setupCompanionRelay() {
+        sessionManager.onMessageReceived = { [weak self] message in
+            DispatchQueue.main.async {
+                self?.handleCompanionMessage(message)
+            }
+        }
+        sessionManager.activate()
+    }
+
+    private func handleCompanionMessage(_ message: WatchMessage) {
+        switch message {
+        case .sessionStateUpdate(let state):
+            companionRelayActive = true
+            sessionState = state
+            isPaired = state.connection != .disconnected
+            isReachable = state.connection == .connected
+            if isPaired && terminalLines.isEmpty {
+                appendLine(TerminalLine(text: "Connected via iPhone", type: .system))
+            }
+
+        case .terminalUpdate(let update):
+            companionRelayActive = true
+            isPaired = true
+            isReachable = true
+            for line in update.lines {
+                appendLine(line)
+            }
+
+        case .approvalRequestMessage(let request):
+            companionRelayActive = true
+            isPaired = true
+            isReachable = true
+            pendingApproval = request
+            HapticManager.approvalNeeded()
+
+        case .connectionStatus(let status):
+            companionRelayActive = true
+            sessionState.connection = status.state
+            sessionState.machineName = status.machineName
+            isPaired = status.state != .disconnected
+            isReachable = status.state == .connected
+
+        case .voiceCommand, .approvalResponse:
+            break
         }
     }
 
@@ -248,6 +299,16 @@ class WatchViewState: ObservableObject {
 
     /// Respond with a specific option label (for AskUserQuestion)
     func respondToPermissionWithOption(_ optionLabel: String) {
+        if companionRelayActive, let requestId = pendingApproval?.id {
+            pendingApproval = nil
+            let deniedLabels = ["no", "deny", "denied"]
+            let approved = !deniedLabels.contains(optionLabel.lowercased())
+            let response = WatchMessage.ApprovalResponse(requestId: requestId, approved: approved)
+            sessionManager.send(.approvalResponse(response))
+            appendLine(TerminalLine(text: "-> \(optionLabel)", type: .command))
+            return
+        }
+
         guard let permissionId = UserDefaults.standard.string(forKey: "watch_pending_permission"),
               let baseURL = bridge.baseURL, let token = bridge.token else { return }
 
@@ -273,6 +334,14 @@ class WatchViewState: ObservableObject {
     }
 
     func respondToPermission(approved: Bool) {
+        if companionRelayActive, let requestId = pendingApproval?.id {
+            pendingApproval = nil
+            let response = WatchMessage.ApprovalResponse(requestId: requestId, approved: approved)
+            sessionManager.send(.approvalResponse(response))
+            appendLine(TerminalLine(text: approved ? "Approved" : "Denied", type: approved ? .output : .error))
+            return
+        }
+
         guard let permissionId = UserDefaults.standard.string(forKey: "watch_pending_permission"),
               let baseURL = bridge.baseURL, let token = bridge.token else { return }
 
@@ -303,6 +372,12 @@ class WatchViewState: ObservableObject {
     func sendVoiceCommand(_ text: String) {
         appendLine(TerminalLine(text: "> \(text)", type: .command))
         appendLine(TerminalLine(text: "", type: .thinking))
+
+        if companionRelayActive {
+            let command = WatchMessage.VoiceCommand(transcribedText: text)
+            sessionManager.send(.voiceCommand(command))
+            return
+        }
 
         guard let baseURL = bridge.baseURL, let token = bridge.token else { return }
 

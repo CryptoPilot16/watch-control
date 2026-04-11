@@ -45,27 +45,19 @@ struct OnboardingView: View {
                 }
 
             } else {
-                Text("Bridge IP address")
+                Text("Open the iPhone app")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.Text.secondary)
 
-                TextField("100.x.x.x", text: $ipAddress)
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.Text.primary)
+                Text("Waiting for iPhone relay")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
                     .multilineTextAlignment(.center)
-                    .focused($ipFocused)
+                    .padding(.vertical, 6)
 
-                Button { connectManual() } label: {
-                    Text("Connect")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background(Theme.Text.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .disabled(ipAddress.isEmpty)
+                ProgressView()
+                    .tint(Theme.Text.primary)
+                    .scaleEffect(0.7)
             }
 
             if let error {
@@ -83,7 +75,7 @@ struct OnboardingView: View {
             if let saved = UserDefaults.standard.string(forKey: "bridge_host"), !saved.isEmpty {
                 ipAddress = saved
             }
-            ipFocused = true
+            ipFocused = false
         }
     }
 

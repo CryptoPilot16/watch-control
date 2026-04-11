@@ -298,8 +298,17 @@ final class RelayService: ObservableObject {
         terminalBuffer.append(line)
         recentTerminalLines = terminalBuffer.getLast(15)
 
-        // Forward to watch
-        let request = ApprovalRequest(toolName: toolName, actionSummary: description)
+        // Forward to watch. The watch response uses ApprovalRequest.id, so keep
+        // a local mapping back to the bridge's permissionId.
+        let request = ApprovalRequest(
+            toolName: toolName,
+            actionSummary: description,
+            options: [
+                ApprovalRequest.OptionItem(label: "Yes"),
+                ApprovalRequest.OptionItem(label: "No"),
+            ]
+        )
+        UserDefaults.standard.set(permissionId, forKey: "pending_permission_\(request.id.uuidString)")
         let message = WatchMessage.approvalRequestMessage(request)
         sessionManager.send(message)
 
