@@ -144,8 +144,11 @@ struct PairingView: View {
             digits[index] = filtered
         }
 
-        // Clear error state on new input
-        if showError {
+        // Clear error state when the user actually types a new digit.
+        // Skip when the field was programmatically reset to "" after a failed
+        // attempt — otherwise resetDigits() would race with showPairingError
+        // and wipe the error message before the user ever sees it.
+        if showError && !filtered.isEmpty {
             withAnimation(.easeOut(duration: 0.2)) {
                 showError = false
                 errorMessage = ""
