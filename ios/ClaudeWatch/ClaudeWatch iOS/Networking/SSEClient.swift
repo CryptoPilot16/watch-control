@@ -29,6 +29,7 @@ final class SSEClient {
 
     var onEvent: ((SSEEvent) -> Void)?
     var onStateChange: ((SSEState) -> Void)?
+    var onUnauthorized: (() -> Void)?
 
     // MARK: - Properties
 
@@ -285,6 +286,9 @@ private final class SSESessionDelegate: NSObject, URLSessionDataDelegate {
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
             client?.handleSSEConnected()
             completionHandler(.allow)
+        } else if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+            client?.onUnauthorized?()
+            completionHandler(.cancel)
         } else {
             client?.handleSSEError(nil, taskIdentifier: dataTask.taskIdentifier)
             completionHandler(.cancel)

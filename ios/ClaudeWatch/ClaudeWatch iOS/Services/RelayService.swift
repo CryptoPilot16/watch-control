@@ -161,6 +161,12 @@ final class RelayService: ObservableObject {
     }
 
     private func setupSSEEventHandler() {
+        sseClient.onUnauthorized = { [weak self] in
+            Task { @MainActor in
+                self?.unpair()
+            }
+        }
+
         sseClient.onEvent = { [weak self] event in
             Task { @MainActor in
                 self?.handleBridgeEvent(event)
