@@ -48,7 +48,7 @@ struct SessionView: View {
                         .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .onChange(of: session.terminalLines.count) { _ in
+                    .onChange(of: session.terminalLines.count) { _, _ in
                         withAnimation(.easeOut(duration: 0.1)) {
                             if isThinking {
                                 proxy.scrollTo("cursor", anchor: .bottom)
