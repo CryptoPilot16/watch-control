@@ -18,6 +18,18 @@ struct ConnectionStatusView: View {
     @State private var isSendingCommand = false
     @FocusState private var isCommandFieldFocused: Bool
 
+    private struct TerminalTheme {
+        let containerBackground: Color
+        let border: Color
+        let commandChevron: Color
+        let commandText: Color
+        let outputBullet: Color
+        let outputText: Color
+        let systemText: Color
+        let thinkingText: Color
+        let commandBarBackground: Color
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -435,6 +447,7 @@ struct ConnectionStatusView: View {
     // MARK: - Terminal output
 
     private var terminalOutput: some View {
+        let theme = currentTerminalTheme
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Terminal")
@@ -455,21 +468,22 @@ struct ConnectionStatusView: View {
             .tabViewStyle(.page(indexDisplayMode: terminalPages.count > 1 ? .always : .never))
             .frame(maxWidth: .infinity)
             .frame(height: 280)
-            .background(Color(hex: "0f1115"))
+            .background(theme.containerBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.subtleText.opacity(0.55), lineWidth: 1)
+                    .stroke(theme.border, lineWidth: 1)
             )
         }
     }
 
     private func terminalPageView(_ page: TerminalPage) -> some View {
+        let theme = theme(forPageId: page.id)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(lines(for: page.id)) { line in
-                        terminalLineView(line)
+                        terminalLineView(line, theme: theme)
                             .id(line.id)
                     }
                 }
@@ -496,39 +510,39 @@ struct ConnectionStatusView: View {
     }
 
     @ViewBuilder
-    private func terminalLineView(_ line: TerminalLine) -> some View {
+    private func terminalLineView(_ line: TerminalLine, theme: TerminalTheme) -> some View {
         let displayType = displayType(for: line)
         switch displayType {
         case .command:
             HStack(spacing: 6) {
                 Text("›")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color(hex: "cfd2d6"))
+                    .foregroundStyle(theme.commandChevron)
                 Text(line.text)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(colorForLineType(displayType))
+                    .foregroundStyle(colorForLineType(displayType, theme: theme))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 8)
             .frame(minHeight: 22)
-            .background(Color(hex: "33353a"))
+            .background(theme.commandBarBackground)
             .clipShape(RoundedRectangle(cornerRadius: 3))
 
         case .output:
             HStack(alignment: .top, spacing: 6) {
                 Text("•")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color(hex: "d3d6da"))
+                    .foregroundStyle(theme.outputBullet)
                 Text(line.text)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(colorForLineType(displayType))
+                    .foregroundStyle(colorForLineType(displayType, theme: theme))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
         default:
             Text(line.text)
                 .font(.system(size: 13, weight: .regular, design: .monospaced))
-                .foregroundStyle(colorForLineType(displayType))
+                .foregroundStyle(colorForLineType(displayType, theme: theme))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -557,14 +571,56 @@ struct ConnectionStatusView: View {
         return false
     }
 
-    private func colorForLineType(_ type: TerminalLine.LineType) -> Color {
+    private func colorForLineType(_ type: TerminalLine.LineType, theme: TerminalTheme) -> Color {
         switch type {
-        case .output:   return Color(hex: "d3d6da")
-        case .command:  return Color(hex: "e3e5e8")
-        case .system:   return Color.subtleText
-        case .thinking: return Color(hex: "c4c7cc").opacity(0.6)
+        case .output:   return theme.outputText
+        case .command:  return theme.commandText
+        case .system:   return theme.systemText
+        case .thinking: return theme.thinkingText
         case .error:    return .red
         }
+    }
+
+    private var currentTerminalTheme: TerminalTheme {
+        theme(forPageId: terminalPageSelection.wrappedValue)
+    }
+
+    private func theme(forPageId pageId: String) -> TerminalTheme {
+        let pageTitle = terminalPages.first(where: { $0.id == pageId })?.title
+            ?? activeTargetLabel
+        let normalized = pageTitle.lowercased()
+        if normalized.contains("codex") {
+            return codexTerminalTheme
+        }
+        return claudeTerminalTheme
+    }
+
+    private var codexTerminalTheme: TerminalTheme {
+        TerminalTheme(
+            containerBackground: Color(hex: "0f1115"),
+            border: Color.subtleText.opacity(0.55),
+            commandChevron: Color(hex: "cfd2d6"),
+            commandText: Color(hex: "e3e5e8"),
+            outputBullet: Color(hex: "d3d6da"),
+            outputText: Color(hex: "d3d6da"),
+            systemText: Color.subtleText,
+            thinkingText: Color(hex: "c4c7cc").opacity(0.6),
+            commandBarBackground: Color(hex: "33353a")
+        )
+    }
+
+    private var claudeTerminalTheme: TerminalTheme {
+        TerminalTheme(
+            containerBackground: Color(hex: "0f1115"),
+            border: Color.claudeOrange.opacity(0.5),
+            commandChevron: Color.claudeOrange,
+            commandText: .white,
+            outputBullet: .white,
+            outputText: .white,
+            systemText: Color(hex: "8f8f8f"),
+            thinkingText: Color.white.opacity(0.6),
+            commandBarBackground: Color(hex: "3a3b40")
+        )
     }
 
     // MARK: - Background banner
