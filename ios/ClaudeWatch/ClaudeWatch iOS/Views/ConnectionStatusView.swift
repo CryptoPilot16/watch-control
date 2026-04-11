@@ -448,7 +448,7 @@ struct ConnectionStatusView: View {
 
     private var terminalOutput: some View {
         let theme = currentTerminalTheme
-        VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Terminal")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
