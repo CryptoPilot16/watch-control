@@ -8,76 +8,67 @@ struct SessionView: View {
     private let cursorTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 0) {
-                // Top bar
-                HStack(spacing: 4) {
-                    ClaudeMascot(size: 14)
-                    Text("Claude")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Theme.Text.primary)
-                    Spacer()
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 5, height: 5)
-                }
-                .padding(.horizontal, 4)
-                .padding(.bottom, 2)
+        VStack(spacing: 4) {
+            // Top bar
+            HStack(spacing: 4) {
+                ClaudeMascot(size: 14)
+                Text("Claude")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Theme.Text.primary)
+                Spacer()
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 5, height: 5)
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 2)
 
-                // Terminal — use regular VStack (not Lazy) to avoid blank flashes
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            // Only show last 30 lines to keep performance stable
-                            ForEach(visibleLines) { line in
-                                terminalLine(line)
-                                    .id(line.id)
-                            }
-
-                            if isThinking {
-                                Text(cursorVisible ? "\u{2588}" : " ")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(Theme.Text.primary)
-                                    .onReceive(cursorTimer) { _ in cursorVisible.toggle() }
-                                    .id("cursor")
-                            }
-
-                            // Spacer for FAB
-                            Spacer().frame(height: 40)
+            // Terminal — use regular VStack (not Lazy) to avoid blank flashes
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        // Only show last 30 lines to keep performance stable
+                        ForEach(visibleLines) { line in
+                            terminalLine(line)
+                                .id(line.id)
                         }
-                        .padding(.horizontal, 4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if isThinking {
+                            Text(cursorVisible ? "\u{2588}" : " ")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Theme.Text.primary)
+                                .onReceive(cursorTimer) { _ in cursorVisible.toggle() }
+                                .id("cursor")
+                        }
                     }
-                    .onChange(of: session.terminalLines.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.1)) {
-                            if isThinking {
-                                proxy.scrollTo("cursor", anchor: .bottom)
-                            } else if let last = visibleLines.last {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
+                    .padding(.horizontal, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onChange(of: session.terminalLines.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        if isThinking {
+                            proxy.scrollTo("cursor", anchor: .bottom)
+                        } else if let last = visibleLines.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
                 }
             }
-            .background(Theme.Background.primary)
 
-            // FAB mic
             Button { showVoiceInput = true } label: {
-                ZStack {
-                    Circle()
-                        .fill(Theme.Text.primary.opacity(0.75))
-                        .frame(width: 28, height: 28)
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.black)
-                }
-                .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+                Label("Command", systemImage: "mic.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 34)
+                    .background(Theme.Text.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 8)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 6)
+            .padding(.bottom, 4)
         }
-        .ignoresSafeArea(edges: .bottom)
+        .background(Theme.Background.primary)
         .sheet(item: $session.pendingApproval) { request in
             ApprovalView(request: request)
         }
