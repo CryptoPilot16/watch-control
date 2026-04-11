@@ -504,19 +504,15 @@ struct ConnectionStatusView: View {
     }
 
     private func colorForTerminalLine(_ line: TerminalLine) -> Color {
-        if (line.type == .output || line.type == .command),
-           let colorHex = line.colorHex {
-            return Color(hex: colorHex)
-        }
         return colorForLineType(line.type)
     }
 
     private func colorForLineType(_ type: TerminalLine.LineType) -> Color {
         switch type {
-        case .output:   return Color.claudeOrange
+        case .output:   return .white
         case .command:  return .white
         case .system:   return Color.subtleText
-        case .thinking: return Color.claudeOrange.opacity(0.5)
+        case .thinking: return .white.opacity(0.5)
         case .error:    return .red
         }
     }

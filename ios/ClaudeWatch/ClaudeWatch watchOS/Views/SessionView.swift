@@ -321,16 +321,11 @@ struct SessionView: View {
     }
 
     private func colorFor(_ line: TerminalLine) -> Color {
-        if (line.type == .output || line.type == .command),
-           let colorHex = line.colorHex {
-            return Color(hex: colorHex)
-        }
-
         switch line.type {
-        case .output:   return Theme.Text.primary
+        case .output:   return .white
         case .command:  return .white
         case .system:   return Theme.Text.secondary
-        case .thinking: return Theme.Text.primary.opacity(0.5)
+        case .thinking: return .white.opacity(0.5)
         case .error:    return Theme.Accent.error
         }
     }
