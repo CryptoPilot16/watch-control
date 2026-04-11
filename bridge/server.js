@@ -22,6 +22,9 @@ const SSE_BUFFER_SIZE = 500;
 const PERMISSION_TIMEOUT_MS = 600_000;
 const SESSION_ID = crypto.randomUUID();
 const CONFIGURED_COMMAND_TARGET = process.env.WATCHCONTROL_TMUX_TARGET || process.env.TMUX_SESSION || null;
+const TMUX_MIRROR_INTERVAL_MS = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_INTERVAL_MS, 10) || 1_000;
+const TMUX_MIRROR_HISTORY_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_HISTORY_LINES, 10) || 80;
+const TMUX_MIRROR_EMIT_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_EMIT_LINES, 10) || 20;
 
 const sessionTokens = new Set();
 let pairingCode = null;
@@ -34,6 +37,12 @@ const sseBuffer = [];
 const sseClients = new Set();
 const pendingPermissions = new Map();
 const pendingPermissionBodies = new Map();
+let tmuxMirrorTimer = null;
+let tmuxMirrorBusy = false;
+let tmuxMirrorTarget = null;
+let tmuxMirrorLines = [];
+let tmuxMirrorActive = false;
+let tmuxMirrorLastError = null;
 
 function generatePairingCode() {
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
@@ -131,6 +140,93 @@ function sendTmuxCommand(target, command) {
   return execFilePromise("tmux", ["send-keys", "-t", target, command, "Enter"]);
 }
 
+function captureTmuxPane(target) {
+  return execFilePromise("tmux", [
+    "capture-pane",
+    "-p",
+    "-J",
+    "-S",
+    `-${TMUX_MIRROR_HISTORY_LINES}`,
+    "-t",
+    target,
+  ]);
+}
+
+function normalizeTmuxCapture(stdout) {
+  return stdout
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""))
+    .filter((line) => line.trim().length > 0);
+}
+
+function findNewTmuxLines(previous, next) {
+  if (!previous.length) return next.slice(-TMUX_MIRROR_EMIT_LINES);
+
+  const maxOverlap = Math.min(previous.length, next.length);
+  for (let size = maxOverlap; size > 0; size--) {
+    let matches = true;
+    for (let index = 0; index < size; index++) {
+      if (previous[previous.length - size + index] !== next[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return next.slice(size);
+  }
+
+  const lastLine = previous[previous.length - 1];
+  const lastIndex = next.lastIndexOf(lastLine);
+  if (lastIndex >= 0) return next.slice(lastIndex + 1);
+
+  return next.slice(-TMUX_MIRROR_EMIT_LINES);
+}
+
+async function pollTmuxMirror() {
+  if (tmuxMirrorBusy) return;
+  if (!sseClients.size && sessionState !== "connected") return;
+
+  tmuxMirrorBusy = true;
+  try {
+    const target = await resolveCommandTarget(tmuxMirrorTarget);
+    if (target !== tmuxMirrorTarget) {
+      tmuxMirrorTarget = target;
+      tmuxMirrorLines = [];
+      log("info", `tmux mirror target: ${target}`);
+    }
+
+    const stdout = await captureTmuxPane(target);
+    const nextLines = normalizeTmuxCapture(stdout);
+    const newLines = findNewTmuxLines(tmuxMirrorLines, nextLines);
+    tmuxMirrorLines = nextLines;
+    tmuxMirrorActive = true;
+    tmuxMirrorLastError = null;
+
+    if (newLines.length) {
+      pushSseEvent("pty-output", { text: `${newLines.join("\n")}\n`, source: "tmux-mirror", target });
+    }
+  } catch (err) {
+    tmuxMirrorActive = false;
+    tmuxMirrorLastError = err.message;
+  } finally {
+    tmuxMirrorBusy = false;
+  }
+}
+
+function startTmuxMirror() {
+  if (tmuxMirrorTimer || TMUX_MIRROR_INTERVAL_MS <= 0) return;
+  tmuxMirrorTimer = setInterval(() => {
+    pollTmuxMirror().catch((err) => {
+      tmuxMirrorActive = false;
+      tmuxMirrorLastError = err.message;
+    });
+  }, TMUX_MIRROR_INTERVAL_MS);
+  pollTmuxMirror().catch((err) => {
+    tmuxMirrorActive = false;
+    tmuxMirrorLastError = err.message;
+  });
+}
+
 function pushSseEvent(event, data) {
   sseEventId++;
   const entry = { id: sseEventId, event, data: typeof data === "string" ? data : JSON.stringify(data) };
@@ -223,6 +319,7 @@ async function handleCommand(req, res) {
     let target = requestedTarget || CONFIGURED_COMMAND_TARGET || "auto";
     try {
       target = await resolveCommandTarget(requestedTarget);
+      tmuxMirrorTarget = target;
       await sendTmuxCommand(target, commandText);
       log("info", `Watch command sent to ${target}: ${commandText.slice(0, 120)}`);
       pushSseEvent("pty-output", { text: `> ${commandText}\n` });
@@ -343,6 +440,12 @@ function handleStatus(_req, res) {
     sessionId: SESSION_ID,
     hasPty: true,
     commandTarget: CONFIGURED_COMMAND_TARGET || "auto",
+    terminalMirror: {
+      active: tmuxMirrorActive,
+      target: tmuxMirrorTarget || CONFIGURED_COMMAND_TARGET || "auto",
+      intervalMs: TMUX_MIRROR_INTERVAL_MS,
+      lastError: tmuxMirrorLastError,
+    },
     sseClients: sseClients.size,
     pairedClients: sessionTokens.size,
     pendingPermissions: pendingPermissions.size,
@@ -380,6 +483,7 @@ async function onRequest(req, res) {
 const server = http.createServer(onRequest);
 server.listen(PORT, "0.0.0.0", () => {
   const code = generatePairingCode();
+  startTmuxMirror();
   console.log("");
   console.log("╔═══════════════════════════════════════╗");
   console.log("║      WATCHCONTROL BRIDGE              ║");
