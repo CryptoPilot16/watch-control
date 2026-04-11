@@ -143,6 +143,15 @@ class WatchViewState: ObservableObject {
 
     func appendLine(_ line: TerminalLine) {
         DispatchQueue.main.async {
+            let signature = "\(line.targetId ?? "_")|\(line.type.rawValue)|\(line.text)"
+            let hasRecentDuplicate = self.terminalLines.suffix(60).contains { existing in
+                let existingSignature = "\(existing.targetId ?? "_")|\(existing.type.rawValue)|\(existing.text)"
+                return existingSignature == signature
+            }
+            if hasRecentDuplicate {
+                return
+            }
+
             if let last = self.terminalLines.last,
                last.text == line.text,
                last.type == line.type,
@@ -294,28 +303,6 @@ class WatchViewState: ObservableObject {
 
         switch type {
         case "tool-output":
-            let toolName = json["tool_name"] as? String ?? "tool"
-            let toolInput = json["tool_input"] as? [String: Any] ?? [:]
-
-            switch toolName {
-            case "Bash":
-                let cmd = toolInput["command"] as? String ?? ""
-                appendLine(TerminalLine(text: "$ \(cmd)", type: .command))
-            case "Read":
-                let path = toolInput["file_path"] as? String ?? ""
-                appendLine(TerminalLine(text: "Read \((path as NSString).lastPathComponent)", type: .system))
-            case "Edit":
-                let path = toolInput["file_path"] as? String ?? ""
-                appendLine(TerminalLine(text: "Edit \((path as NSString).lastPathComponent)", type: .system))
-            case "Write":
-                let path = toolInput["file_path"] as? String ?? ""
-                appendLine(TerminalLine(text: "Write \((path as NSString).lastPathComponent)", type: .system))
-            case "Grep":
-                let pattern = toolInput["pattern"] as? String ?? ""
-                appendLine(TerminalLine(text: "grep \"\(pattern)\"", type: .command))
-            default:
-                appendLine(TerminalLine(text: "[\(toolName)]", type: .system))
-            }
             isStreaming = true
 
         case "permission-request":
@@ -385,16 +372,21 @@ class WatchViewState: ObservableObject {
             }
 
         case "pty-output":
-            // Raw PTY output — show it
+            // Raw PTY output — render line by line to preserve terminal order and readability.
             if let text = json["text"] as? String {
                 let target = json["target"] as? String
                 let cleaned = text.replacingOccurrences(
                     of: "\\x1B\\[[0-9;]*[a-zA-Z]",
                     with: "",
                     options: .regularExpression
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleaned.isEmpty {
-                    appendLine(TerminalLine(text: String(cleaned.prefix(80)), type: .output, targetId: target))
+                )
+                let lines = cleaned
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                for line in lines {
+                    appendLine(TerminalLine(text: String(line.prefix(120)), type: .output, targetId: target))
                 }
             }
 
