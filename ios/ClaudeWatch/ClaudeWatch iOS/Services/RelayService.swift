@@ -408,9 +408,6 @@ final class RelayService: ObservableObject {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
 
-        terminalBuffer.append(TerminalLine(text: "> \(command)", type: .command))
-        recentTerminalLines = terminalBuffer.getLast(15)
-
         do {
             try await bridgeClient.sendCommand(text: command + "\n")
         } catch {

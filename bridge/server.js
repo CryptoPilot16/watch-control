@@ -248,6 +248,17 @@ function startTmuxMirror() {
   });
 }
 
+function scheduleTmuxMirrorRefresh() {
+  for (const delay of [250, 1_250, 2_500]) {
+    setTimeout(() => {
+      pollTmuxMirror().catch((err) => {
+        tmuxMirrorActive = false;
+        tmuxMirrorLastError = err.message;
+      });
+    }, delay);
+  }
+}
+
 async function sendTmuxSnapshot(client) {
   if (tmuxMirrorBusy) return;
 
@@ -367,7 +378,7 @@ async function handleCommand(req, res) {
       tmuxMirrorTarget = target;
       await sendTmuxCommand(target, commandText);
       log("info", `Watch command sent to ${target}: ${commandText.slice(0, 120)}`);
-      pushSseEvent("pty-output", { text: `> ${commandText}\n` });
+      scheduleTmuxMirrorRefresh();
       return jsonResponse(res, 200, { ok: true, target });
     } catch (err) {
       log("error", `Failed to send watch command to ${target}:`, err.message);

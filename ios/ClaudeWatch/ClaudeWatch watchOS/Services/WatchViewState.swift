@@ -370,9 +370,6 @@ class WatchViewState: ObservableObject {
     // MARK: - Voice command (direct to bridge)
 
     func sendVoiceCommand(_ text: String) {
-        appendLine(TerminalLine(text: "> \(text)", type: .command))
-        appendLine(TerminalLine(text: "", type: .thinking))
-
         if companionRelayActive {
             let command = WatchMessage.VoiceCommand(transcribedText: text)
             sessionManager.send(.voiceCommand(command))
