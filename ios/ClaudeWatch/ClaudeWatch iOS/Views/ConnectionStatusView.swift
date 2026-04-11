@@ -459,7 +459,7 @@ struct ConnectionStatusView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.claudeOrange.opacity(0.35), lineWidth: 1)
+                    .stroke(Color.subtleText.opacity(0.55), lineWidth: 1)
             )
         }
     }
@@ -503,7 +503,7 @@ struct ConnectionStatusView: View {
             HStack(spacing: 6) {
                 Text("›")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color(hex: "cfd2d6"))
                 Text(line.text)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .foregroundStyle(colorForLineType(displayType))
@@ -511,14 +511,14 @@ struct ConnectionStatusView: View {
             }
             .padding(.horizontal, 8)
             .frame(minHeight: 22)
-            .background(Color(hex: "3a3b40"))
+            .background(Color(hex: "33353a"))
             .clipShape(RoundedRectangle(cornerRadius: 3))
 
         case .output:
             HStack(alignment: .top, spacing: 6) {
                 Text("•")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color(hex: "d3d6da"))
                 Text(line.text)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .foregroundStyle(colorForLineType(displayType))
@@ -559,10 +559,10 @@ struct ConnectionStatusView: View {
 
     private func colorForLineType(_ type: TerminalLine.LineType) -> Color {
         switch type {
-        case .output:   return Color(white: 0.75)
-        case .command:  return .white
+        case .output:   return Color(hex: "d3d6da")
+        case .command:  return Color(hex: "e3e5e8")
         case .system:   return Color.subtleText
-        case .thinking: return Color(white: 0.75).opacity(0.6)
+        case .thinking: return Color(hex: "c4c7cc").opacity(0.6)
         case .error:    return .red
         }
     }
