@@ -44,20 +44,55 @@ final class BonjourDiscovery: ObservableObject {
 
     // MARK: - Discovery
 
-    /// Searches for the bridge service on LAN with a 5-second timeout.
-    /// Falls back to localhost:7860 if Bonjour fails (common on simulator).
+    /// Discovers the bridge.
+    /// Order: 1) manually-configured host from UserDefaults (Tailscale or any reachable IP),
+    ///        2) Bonjour on the local network,
+    ///        3) localhost fallback (simulator).
     @MainActor
     func discover() async throws -> DiscoveredService {
         isSearching = true
         defer { isSearching = false }
 
-        // Try Bonjour first, fall back to localhost
+        // 1. Manual override (set via PairingView "Server IP" field, persisted in UserDefaults)
+        if let savedHost = UserDefaults.standard.string(forKey: "bridge_host"),
+           !savedHost.isEmpty {
+            print("[BonjourDiscovery] Trying saved host: \(savedHost)")
+            if let service = try? await tryHost(savedHost) {
+                return service
+            }
+            print("[BonjourDiscovery] Saved host failed, falling through to Bonjour")
+        }
+
+        // 2. Bonjour on LAN, 3. localhost fallback
         do {
             return try await bonjourDiscover()
         } catch {
             print("[BonjourDiscovery] Bonjour failed (\(error.localizedDescription)), trying localhost fallback...")
             return try await localhostFallback()
         }
+    }
+
+    /// Verifies a manually-entered host by hitting /status across the bridge port range.
+    private func tryHost(_ host: String) async throws -> DiscoveredService {
+        for port in UInt16(7860)...UInt16(7869) {
+            let url = URL(string: "http://\(host):\(port)/status")!
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 3
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                    return DiscoveredService(
+                        name: "manual",
+                        host: host,
+                        port: port,
+                        machineName: host
+                    )
+                }
+            } catch {
+                continue
+            }
+        }
+        throw DiscoveryError.noServiceFound
     }
 
     /// Tries to connect to localhost:7860-7869 directly.

@@ -7,7 +7,9 @@ struct PairingView: View {
     // MARK: - State
 
     @State private var digits: [String] = Array(repeating: "", count: 6)
+    @State private var bridgeHost: String = UserDefaults.standard.string(forKey: "bridge_host") ?? ""
     @FocusState private var focusedField: Int?
+    @FocusState private var hostFieldFocused: Bool
     @State private var shakeOffset: CGFloat = 0
     @State private var showError: Bool = false
     @State private var errorMessage: String = ""
@@ -24,6 +26,7 @@ struct PairingView: View {
 
                 mascotIcon
                 titleSection
+                hostField
                 digitFields
                 statusSection
                 bottomInstruction
@@ -94,9 +97,37 @@ struct PairingView: View {
         }
     }
 
+    private var hostField: some View {
+        VStack(spacing: 6) {
+            Text("Bridge IP (Tailscale or LAN)")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.subtleText)
+            TextField("100.x.x.x", text: $bridgeHost)
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(Color.claudeOrange)
+                .multilineTextAlignment(.center)
+                .keyboardType(.numbersAndPunctuation)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .focused($hostFieldFocused)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 16)
+                .background(Color.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.fieldBorder, lineWidth: 1)
+                )
+                .onChange(of: bridgeHost) { _, newValue in
+                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    UserDefaults.standard.set(trimmed, forKey: "bridge_host")
+                }
+        }
+    }
+
     private var bottomInstruction: some View {
-        Text("Run /claude-watch in Claude Code to get started")
-            .font(.system(size: 13, design: .monospaced))
+        Text("Start the bridge on your VPS to get a 6-digit pairing code")
+            .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(Color.subtleText)
             .multilineTextAlignment(.center)
             .padding(.bottom, 16)
