@@ -230,12 +230,10 @@ final class RelayService: ObservableObject {
         guard isPaired else { return }
         do {
             var response = try await bridgeClient.fetchTargets()
-            let allTargets = response.targets.map(\.id)
-            let mirroredTargets = response.targets
-                .filter { $0.mirrored == true }
-                .map(\.id)
-            if !allTargets.isEmpty && Set(mirroredTargets) != Set(allTargets) {
-                try? await bridgeClient.selectMirrorTargets(allTargets)
+            let mirroredTargets = response.targets.filter { $0.mirrored == true }
+            if mirroredTargets.isEmpty,
+               let bootstrapTarget = response.activeTarget ?? response.targets.first?.id {
+                try? await bridgeClient.selectMirrorTargets([bootstrapTarget])
                 response = try await bridgeClient.fetchTargets()
             }
 

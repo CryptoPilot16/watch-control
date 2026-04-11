@@ -1,5 +1,4 @@
 import SwiftUI
-import WatchKit
 import AVFoundation
 
 struct SessionView: View {
@@ -270,7 +269,12 @@ struct SessionView: View {
         } else if canSendTypedCommand {
             sendCommand()
         } else {
-            presentDictation()
+            commandError = "Type text or hold to speak"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if commandError == "Type text or hold to speak" {
+                    commandError = nil
+                }
+            }
         }
     }
 
@@ -305,29 +309,6 @@ struct SessionView: View {
         HapticManager.commandSent()
         session.sendVoiceCommand(text)
         commandText = ""
-    }
-
-    private func presentDictation() {
-        guard let controller = WKExtension.shared().visibleInterfaceController else {
-            commandError = "Could not open dictation"
-            return
-        }
-
-        commandError = nil
-        controller.presentTextInputController(
-            withSuggestions: nil,
-            allowedInputMode: .plain
-        ) { results in
-            DispatchQueue.main.async {
-                guard let text = results?.compactMap({ $0 as? String }).first?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                    !text.isEmpty
-                else { return }
-
-                HapticManager.commandSent()
-                session.sendVoiceCommand(text)
-            }
-        }
     }
 
     private var statusColor: Color {
