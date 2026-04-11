@@ -25,6 +25,7 @@ const CONFIGURED_COMMAND_TARGET = process.env.WATCHCONTROL_TMUX_TARGET || proces
 const TMUX_MIRROR_INTERVAL_MS = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_INTERVAL_MS, 10) || 1_000;
 const TMUX_MIRROR_HISTORY_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_HISTORY_LINES, 10) || 80;
 const TMUX_MIRROR_EMIT_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_EMIT_LINES, 10) || 20;
+const AGENT_COMMAND_RE = /^(claude|codex)$/;
 
 const sessionTokens = new Set();
 let pairingCode = null;
@@ -131,13 +132,33 @@ async function resolveCommandTarget(requestedTarget) {
     const [target, command = ""] = line.split("\t");
     return { target, command: command.toLowerCase() };
   });
-  const preferred = panes.find((pane) => /^(claude|codex)$/.test(pane.command)) || panes[0];
-  if (!preferred) throw new Error("No tmux panes available");
+  const preferred = panes.find((pane) => AGENT_COMMAND_RE.test(pane.command));
+  if (!preferred) throw new Error("No Claude/Codex tmux pane available");
   return preferred.target;
 }
 
 function sendTmuxCommand(target, command) {
   return execFilePromise("tmux", ["send-keys", "-t", target, command, "Enter"]);
+}
+
+async function getTmuxPaneCommand(target) {
+  const command = await execFilePromise("tmux", [
+    "display-message",
+    "-p",
+    "-t",
+    target,
+    "#{pane_current_command}",
+  ]);
+  return command.trim().toLowerCase();
+}
+
+async function resolveMirrorTarget() {
+  const target = await resolveCommandTarget(tmuxMirrorTarget);
+  const command = await getTmuxPaneCommand(target);
+  if (!AGENT_COMMAND_RE.test(command)) {
+    throw new Error(`tmux pane ${target} is running ${command || "nothing"}, not Claude/Codex`);
+  }
+  return target;
 }
 
 function captureTmuxPane(target) {
@@ -188,7 +209,7 @@ async function pollTmuxMirror() {
 
   tmuxMirrorBusy = true;
   try {
-    const target = await resolveCommandTarget(tmuxMirrorTarget);
+    const target = await resolveMirrorTarget();
     if (target !== tmuxMirrorTarget) {
       tmuxMirrorTarget = target;
       tmuxMirrorLines = [];
@@ -232,7 +253,7 @@ async function sendTmuxSnapshot(client) {
 
   tmuxMirrorBusy = true;
   try {
-    const target = await resolveCommandTarget(tmuxMirrorTarget);
+    const target = await resolveMirrorTarget();
     tmuxMirrorTarget = target;
     const stdout = await captureTmuxPane(target);
     const nextLines = normalizeTmuxCapture(stdout);
