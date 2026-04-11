@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @EnvironmentObject private var session: WatchViewState
+    @StateObject private var watchSession = WatchSessionManager.shared
     @StateObject private var bridge = WatchBridgeClient.shared
 
     @State private var code = ""
@@ -9,69 +10,34 @@ struct OnboardingView: View {
     @State private var isConnecting = false
     @State private var error: String?
     @State private var bridgeURL: URL?
+    @State private var showDirectPairing = false
     @FocusState private var codeFocused: Bool
     @FocusState private var ipFocused: Bool
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    ClaudeMascot(size: 14)
-                    Text("watch-control")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(Theme.Text.primary)
-                }
+            VStack(spacing: 10) {
+                header
+                relayWaitingPanel
 
-                Text("Pair code")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.Text.secondary)
-
-                TextField("000000", text: $code)
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.Text.primary)
-                    .multilineTextAlignment(.center)
-                    .textContentType(.oneTimeCode)
-                    .focused($codeFocused)
-                    .onChange(of: code) { _, newValue in
-                        let filtered = String(newValue.filter { $0.isNumber }.prefix(6))
-                        if filtered != newValue { code = filtered }
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showDirectPairing.toggle()
                     }
-
-                Text("Bridge \(ipAddress)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Theme.Text.secondary)
-                    .lineLimit(1)
-
-                Button { submitCode(code) } label: {
-                    Text("Pair")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.black)
+                } label: {
+                    Text(showDirectPairing ? "Hide bridge code" : "Use bridge code")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Theme.Text.primary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                        .background(Theme.Text.primary)
+                        .frame(height: 30)
+                        .background(Theme.Background.overlay)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .disabled(ipAddress.isEmpty || code.count != 6 || isConnecting)
 
-                if isConnecting {
-                    ProgressView()
-                        .tint(Theme.Text.primary)
-                        .scaleEffect(0.7)
-                }
-
-                TextField("Edit bridge", text: $ipAddress)
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.Text.primary)
-                    .multilineTextAlignment(.center)
-                    .focused($ipFocused)
-
-                if let error {
-                    Text(error)
-                        .font(.system(size: 10))
-                        .foregroundColor(Theme.Accent.error)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.center)
+                if showDirectPairing {
+                    directPairingForm
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .padding(.horizontal, 8)
@@ -80,7 +46,111 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.Background.primary)
         .onAppear {
-            codeFocused = true
+            if showDirectPairing {
+                codeFocused = true
+            }
+        }
+        .onChange(of: showDirectPairing) { _, isShowing in
+            codeFocused = isShowing
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 4) {
+            ClaudeMascot(size: 14)
+            Text("watch-control")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(Theme.Text.primary)
+        }
+    }
+
+    private var relayWaitingPanel: some View {
+        VStack(spacing: 6) {
+            ProgressView()
+                .tint(Theme.Text.primary)
+                .scaleEffect(0.75)
+
+            Text("Waiting for iPhone relay")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Theme.Text.primary)
+                .multilineTextAlignment(.center)
+
+            Text(relayInstruction)
+                .font(.system(size: 10))
+                .foregroundColor(Theme.Text.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .background(Theme.Background.overlay)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var relayInstruction: String {
+        if !watchSession.isActivated {
+            return "Starting the phone link..."
+        }
+        if watchSession.isReachable {
+            return "Open watch-control on iPhone and connect to the bridge."
+        }
+        return "Open watch-control on iPhone. The Watch will continue once the phone connects."
+    }
+
+    private var directPairingForm: some View {
+        VStack(spacing: 8) {
+            Text("Pair code")
+                .font(.system(size: 11))
+                .foregroundColor(Theme.Text.secondary)
+
+            TextField("000000", text: $code)
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.Text.primary)
+                .multilineTextAlignment(.center)
+                .textContentType(.oneTimeCode)
+                .focused($codeFocused)
+                .onChange(of: code) { _, newValue in
+                    let filtered = String(newValue.filter { $0.isNumber }.prefix(6))
+                    if filtered != newValue { code = filtered }
+                }
+
+            Text("Bridge \(ipAddress)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Theme.Text.secondary)
+                .lineLimit(1)
+
+            Button { submitCode(code) } label: {
+                Text("Pair")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 32)
+                    .background(Theme.Text.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(ipAddress.isEmpty || code.count != 6 || isConnecting)
+
+            if isConnecting {
+                ProgressView()
+                    .tint(Theme.Text.primary)
+                    .scaleEffect(0.7)
+            }
+
+            TextField("Edit bridge", text: $ipAddress)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.Text.primary)
+                .multilineTextAlignment(.center)
+                .focused($ipFocused)
+
+            if let error {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.Accent.error)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
