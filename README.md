@@ -125,6 +125,7 @@ Source lives in [`ios/`](ios/) — open `ios/ClaudeWatch/ClaudeWatch.xcodeproj` 
 | `PUSHOVER_USER_KEY` | no | — | Pushover user key (fallback notifications) |
 | `TMUX_SESSION` | no | `codex:0.0` | Default tmux target pane |
 | `TMUX_TARGETS` | no | `$TMUX_SESSION` | Space-separated list of panes to watch |
+| `WATCHCONTROL_TMUX_TARGET` | no | auto-detected | tmux pane that typed/spoken watch commands are sent to |
 | `APPROVE_PORT` | no | `8787` | Webhook listening port |
 | `COOLDOWN_SECONDS` | no | `30` | Min seconds between push notifications |
 
@@ -136,7 +137,7 @@ Source lives in [`ios/`](ios/) — open `ios/ClaudeWatch/ClaudeWatch.xcodeproj` 
 |---|---|---|
 | `/pair` | POST | Pair the watch with a 6-digit code, returns session token |
 | `/events` | GET | SSE stream — watch listens here for approval requests |
-| `/command` | POST | Watch posts approval/deny decisions |
+| `/command` | POST | Watch posts approval/deny decisions or typed/spoken commands |
 | `/hooks/permission` | POST | Claude Code `PermissionRequest` hook |
 | `/hooks/tool-output` | POST | Claude Code `PostToolUse` hook |
 | `/hooks/stop` | POST | Claude Code `Stop` hook |

@@ -1,6 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import os from "node:os";
+import { execFile } from "node:child_process";
 
 function log(level, msg, ...args) {
   const ts = new Date().toISOString();
@@ -20,6 +21,7 @@ const SSE_HEARTBEAT_INTERVAL_MS = 10_000;
 const SSE_BUFFER_SIZE = 500;
 const PERMISSION_TIMEOUT_MS = 600_000;
 const SESSION_ID = crypto.randomUUID();
+const CONFIGURED_COMMAND_TARGET = process.env.WATCHCONTROL_TMUX_TARGET || process.env.TMUX_SESSION || null;
 
 const sessionTokens = new Set();
 let pairingCode = null;
@@ -95,6 +97,38 @@ function readBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+function execFilePromise(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout);
+    });
+  });
+}
+
+async function resolveCommandTarget(requestedTarget) {
+  if (requestedTarget) return requestedTarget;
+  if (CONFIGURED_COMMAND_TARGET) return CONFIGURED_COMMAND_TARGET;
+
+  const stdout = await execFilePromise("tmux", [
+    "list-panes",
+    "-a",
+    "-F",
+    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}",
+  ]);
+  const panes = stdout.trim().split("\n").filter(Boolean).map((line) => {
+    const [target, command = ""] = line.split("\t");
+    return { target, command: command.toLowerCase() };
+  });
+  const preferred = panes.find((pane) => /^(claude|codex)$/.test(pane.command)) || panes[0];
+  if (!preferred) throw new Error("No tmux panes available");
+  return preferred.target;
+}
+
+function sendTmuxCommand(target, command) {
+  return execFilePromise("tmux", ["send-keys", "-t", target, command, "Enter"]);
 }
 
 function pushSseEvent(event, data) {
@@ -179,7 +213,27 @@ async function handleCommand(req, res) {
     log("info", `Permission ${permissionId} resolved: ${decision.behavior}`);
     return jsonResponse(res, 200, { ok: true });
   }
-  return jsonResponse(res, 400, { error: "Missing permissionId+decision" });
+
+  const { command } = body;
+  if (typeof command === "string" && command.trim().length > 0) {
+    const commandText = command.trim();
+    const requestedTarget = typeof body.target === "string" && body.target.trim().length > 0
+      ? body.target.trim()
+      : null;
+    let target = requestedTarget || CONFIGURED_COMMAND_TARGET || "auto";
+    try {
+      target = await resolveCommandTarget(requestedTarget);
+      await sendTmuxCommand(target, commandText);
+      log("info", `Watch command sent to ${target}: ${commandText.slice(0, 120)}`);
+      pushSseEvent("pty-output", { text: `> ${commandText}\n` });
+      return jsonResponse(res, 200, { ok: true, target });
+    } catch (err) {
+      log("error", `Failed to send watch command to ${target}:`, err.message);
+      return jsonResponse(res, 500, { error: `Failed to send command to ${target}` });
+    }
+  }
+
+  return jsonResponse(res, 400, { error: "Missing permissionId+decision or command" });
 }
 
 function handleEvents(req, res) {
@@ -287,7 +341,8 @@ function handleStatus(_req, res) {
   return jsonResponse(res, 200, {
     state: sessionState,
     sessionId: SESSION_ID,
-    hasPty: false,
+    hasPty: true,
+    commandTarget: CONFIGURED_COMMAND_TARGET || "auto",
     sseClients: sseClients.size,
     pairedClients: sessionTokens.size,
     pendingPermissions: pendingPermissions.size,
