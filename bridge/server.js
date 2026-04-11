@@ -28,6 +28,10 @@ const TMUX_MIRROR_EMIT_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_EMI
 const MAX_AGENT_TARGETS = parseInt(process.env.WATCHCONTROL_MAX_TARGETS, 10) || 4;
 const AGENT_COMMAND_RE = /^(claude|codex)$/;
 const TARGET_COLORS = ["dc2626", "0ea5e9", "22c55e", "e8a735"];
+const PUSHOVER_APP_TOKEN = (process.env.PUSHOVER_APP_TOKEN || "").trim();
+const PUSHOVER_USER_KEY = (process.env.PUSHOVER_USER_KEY || "").trim();
+const PUSHOVER_DEVICE = (process.env.PUSHOVER_DEVICE || "").trim();
+const WATCHCONTROL_NOTIFY_COOLDOWN_MS = parseInt(process.env.WATCHCONTROL_NOTIFY_COOLDOWN_MS, 10) || 30_000;
 
 const sessionTokens = new Set();
 let pairingCode = null;
@@ -50,6 +54,7 @@ let tmuxMirrorActive = false;
 let tmuxMirrorLastError = null;
 const knownCommandTargets = new Map();
 const remainOnExitTargets = new Set();
+let lastApprovalNotificationAt = 0;
 
 function generatePairingCode() {
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
@@ -583,6 +588,55 @@ function formatSseMessage(entry) {
   return msg;
 }
 
+function approvalNotificationAvailable() {
+  return PUSHOVER_APP_TOKEN.length > 0 && PUSHOVER_USER_KEY.length > 0;
+}
+
+function summarizePermissionRequest(body) {
+  const toolName = body.tool_name || "Tool";
+  const toolInput = body.tool_input || {};
+  if (typeof toolInput.command === "string" && toolInput.command.trim()) {
+    return `${toolName}: ${toolInput.command.trim().slice(0, 120)}`;
+  }
+  if (typeof toolInput.file_path === "string" && toolInput.file_path.trim()) {
+    return `${toolName}: ${toolInput.file_path.trim().split("/").pop()}`;
+  }
+  if (Array.isArray(toolInput.questions) && toolInput.questions[0]?.question) {
+    return `${toolName}: ${String(toolInput.questions[0].question).slice(0, 120)}`;
+  }
+  return `${toolName}: approval requested`;
+}
+
+async function sendApprovalNotification(body) {
+  if (!approvalNotificationAvailable()) return;
+
+  const now = Date.now();
+  if (now - lastApprovalNotificationAt < WATCHCONTROL_NOTIFY_COOLDOWN_MS) return;
+  lastApprovalNotificationAt = now;
+
+  const params = new URLSearchParams();
+  params.set("token", PUSHOVER_APP_TOKEN);
+  params.set("user", PUSHOVER_USER_KEY);
+  params.set("title", "Claude Approval Needed");
+  params.set("message", summarizePermissionRequest(body));
+  params.set("priority", "0");
+  if (PUSHOVER_DEVICE) params.set("device", PUSHOVER_DEVICE);
+
+  try {
+    const response = await fetch("https://api.pushover.net/1/messages.json", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      log("warn", `Failed to send approval notification: HTTP ${response.status} ${text}`);
+    }
+  } catch (err) {
+    log("warn", "Failed to send approval notification:", err.message);
+  }
+}
+
 function waitForPermission(permissionId) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -774,6 +828,9 @@ async function handleHookPermission(req, res) {
   log("info", `Permission request received (id: ${permissionId})`, body.tool_name || "");
   if (body.permission_suggestions) pendingPermissionBodies.set(permissionId, body.permission_suggestions);
   pushSseEvent("permission-request", { permissionId, ...body });
+  sendApprovalNotification(body).catch((err) => {
+    log("warn", "Approval notification task failed:", err.message);
+  });
   const decision = await waitForPermission(permissionId);
   log("info", `Permission resolved: ${decision.behavior}`);
   // Map the watch's allow/deny decision into the current Claude Code
