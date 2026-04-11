@@ -198,6 +198,7 @@ final class RelayService: ObservableObject {
     func syncWatchState() {
         guard isPaired else { return }
         updateWatchState()
+        sendTerminalSnapshotToWatch()
     }
 
     private func handleBridgeEvent(_ event: SSEClient.SSEEvent) {
@@ -251,14 +252,19 @@ final class RelayService: ObservableObject {
             options: .regularExpression
         )
 
-        guard !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let lines = cleaned
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { TerminalLine(text: $0, type: .output) }
+        guard !lines.isEmpty else { return }
 
-        let line = TerminalLine(text: cleaned, type: .output)
-        terminalBuffer.append(line)
+        for line in lines {
+            terminalBuffer.append(line)
+            pendingTerminalLines.append(line)
+        }
         recentTerminalLines = terminalBuffer.getLast(15)
 
-        // Batch terminal updates to the watch (1-second window)
-        pendingTerminalLines.append(line)
         scheduleBatchSend()
     }
 
@@ -583,6 +589,14 @@ final class RelayService: ObservableObject {
         )
 
         sessionManager.updateApplicationContext(with: state)
+    }
+
+    private func sendTerminalSnapshotToWatch() {
+        let lines = terminalBuffer.getLast(15)
+        guard !lines.isEmpty else { return }
+
+        let update = WatchMessage.TerminalUpdate(lines: lines)
+        sessionManager.send(.terminalUpdate(update))
     }
 
     private var currentActivity: SessionActivity {
