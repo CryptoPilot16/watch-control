@@ -34,6 +34,10 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>watch-control needs to find your bridge server on your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>watch-control uses the microphone to dictate commands to Claude.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>watch-control uses speech recognition to turn your dictated commands into text.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

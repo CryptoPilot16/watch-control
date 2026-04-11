@@ -1,10 +1,13 @@
 import SwiftUI
+import Speech
+import AVFoundation
 
 struct ConnectionStatusView: View {
 
     @EnvironmentObject private var relayService: RelayService
     @EnvironmentObject private var sessionManager: WatchSessionManager
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var speechService = MobileSpeechService()
 
     @State private var showSettings = false
     @State private var showBackgroundBanner = false
@@ -187,21 +190,40 @@ struct ConnectionStatusView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
 
-                TextField("Say it or type it", text: $commandText, axis: .vertical)
-                    .font(.system(size: 16))
-                    .foregroundStyle(.white)
-                    .lineLimit(3...6)
-                    .padding(12)
-                    .background(Color.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .focused($isCommandFieldFocused)
-                    .submitLabel(.send)
-                    .onSubmit {
-                        sendCommandFromSheet()
-                    }
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("Say it or type it", text: $commandText, axis: .vertical)
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white)
+                        .lineLimit(3...6)
+                        .padding(12)
+                        .background(Color.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .focused($isCommandFieldFocused)
+                        .submitLabel(.send)
+                        .onSubmit {
+                            sendCommandFromSheet()
+                        }
 
-                if let commandError {
-                    Text(commandError)
+                    Button {
+                        toggleRecording()
+                    } label: {
+                        Image(systemName: speechService.isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 48, height: 48)
+                            .background(speechService.isRecording ? Color.red : Color.claudeOrange)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(speechService.isRecording ? "Stop dictation" : "Start dictation")
+                }
+
+                Text(speechService.isRecording ? "Listening..." : "Tap the mic to speak")
+                    .font(.system(size: 12))
+                    .foregroundStyle(speechService.isRecording ? Color.claudeAmber : Color.subtleText)
+
+                if let errorText = commandError ?? speechService.error {
+                    Text(errorText)
                         .font(.system(size: 13))
                         .foregroundStyle(.red)
                 }
@@ -239,6 +261,12 @@ struct ConnectionStatusView: View {
                     isCommandFieldFocused = true
                 }
             }
+            .onChange(of: speechService.transcript) { _, transcript in
+                commandText = transcript
+            }
+            .onDisappear {
+                speechService.stopRecording()
+            }
         }
         .presentationDetents([.medium, .large])
     }
@@ -249,6 +277,7 @@ struct ConnectionStatusView: View {
 
         commandError = nil
         isSendingCommand = true
+        speechService.stopRecording()
 
         Task {
             do {
@@ -260,6 +289,12 @@ struct ConnectionStatusView: View {
             }
             isSendingCommand = false
         }
+    }
+
+    private func toggleRecording() {
+        commandError = nil
+        isCommandFieldFocused = false
+        speechService.toggleRecording()
     }
 
     private var canSendCommand: Bool {
@@ -417,6 +452,133 @@ struct ConnectionStatusView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+// MARK: - Mobile speech
+
+@MainActor
+private final class MobileSpeechService: NSObject, ObservableObject {
+    @Published var isRecording = false
+    @Published var transcript = ""
+    @Published var error: String?
+
+    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    private let audioEngine = AVAudioEngine()
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var hasInstalledTap = false
+
+    func toggleRecording() {
+        if isRecording {
+            stopRecording()
+        } else {
+            Task { await startRecording() }
+        }
+    }
+
+    func stopRecording() {
+        guard isRecording || recognitionTask != nil || recognitionRequest != nil else { return }
+        isRecording = false
+
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        if hasInstalledTap {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            hasInstalledTap = false
+        }
+
+        recognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+        recognitionRequest = nil
+        recognitionTask = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func startRecording() async {
+        guard !isRecording else { return }
+        error = nil
+
+        guard await requestSpeechPermission() else {
+            error = "Speech recognition permission is needed."
+            return
+        }
+
+        guard await requestMicrophonePermission() else {
+            error = "Microphone permission is needed."
+            return
+        }
+
+        guard let recognizer, recognizer.isAvailable else {
+            error = "Speech recognition is not available right now."
+            return
+        }
+
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        transcript = ""
+
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            recognitionRequest = request
+
+            let inputNode = audioEngine.inputNode
+            let recordingFormat = inputNode.outputFormat(forBus: 0)
+            if hasInstalledTap {
+                inputNode.removeTap(onBus: 0)
+                hasInstalledTap = false
+            }
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+                request.append(buffer)
+            }
+            hasInstalledTap = true
+
+            audioEngine.prepare()
+            try audioEngine.start()
+            isRecording = true
+
+            recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, recognitionError in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let result {
+                        self.transcript = result.bestTranscription.formattedString
+                    }
+                    if let recognitionError {
+                        if self.isRecording {
+                            self.error = recognitionError.localizedDescription
+                        }
+                        self.stopRecording()
+                    } else if result?.isFinal == true {
+                        self.stopRecording()
+                    }
+                }
+            }
+        } catch {
+            self.error = error.localizedDescription
+            stopRecording()
+        }
+    }
+
+    private func requestSpeechPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    private func requestMicrophonePermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                continuation.resume(returning: allowed)
+            }
+        }
     }
 }
 
