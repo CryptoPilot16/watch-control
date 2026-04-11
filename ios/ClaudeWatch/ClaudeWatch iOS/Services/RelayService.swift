@@ -24,6 +24,8 @@ final class RelayService: ObservableObject {
     @Published private(set) var recentTerminalLines: [TerminalLine] = []
     @Published private(set) var connectionState: ConnectionState = .disconnected
     @Published private(set) var lastConnected: Date?
+    @Published private(set) var terminalTargets: [BridgeTarget] = []
+    @Published private(set) var activeTerminalTarget: String?
 
     // Permission prompt state
     @Published var pendingPermission: PendingPermission? = nil
@@ -106,6 +108,8 @@ final class RelayService: ObservableObject {
 
         print("[RelayService] isPaired = true, starting event stream")
 
+        await refreshTargets()
+
         // Start SSE connection
         startEventStream()
         startElapsedTimer()
@@ -129,6 +133,8 @@ final class RelayService: ObservableObject {
         elapsedSeconds = 0
         recentTerminalLines = []
         connectionState = .disconnected
+        terminalTargets = []
+        activeTerminalTarget = nil
 
         UserDefaults.standard.removeObject(forKey: "paired_machine_name")
         UserDefaults.standard.removeObject(forKey: "last_connected")
@@ -181,6 +187,7 @@ final class RelayService: ObservableObject {
                     self?.lastConnected = Date()
                     UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "last_connected")
                     self?.updateWatchState()
+                    Task { await self?.refreshTargets() }
                 case .connecting:
                     self?.connectionState = .connecting
                 case .disconnected:
@@ -205,6 +212,37 @@ final class RelayService: ObservableObject {
         guard isPaired else { return }
         updateWatchState()
         sendTerminalSnapshotToWatch()
+        Task { await refreshTargets() }
+    }
+
+    func refreshTargets() async {
+        guard isPaired else { return }
+        do {
+            let response = try await bridgeClient.fetchTargets()
+            terminalTargets = response.targets
+            activeTerminalTarget = response.activeTarget
+        } catch {
+            print("[RelayService] Failed to refresh targets: \(error)")
+        }
+    }
+
+    func selectTarget(_ target: BridgeTarget) {
+        Task {
+            do {
+                try await bridgeClient.selectTarget(target.id)
+                await refreshTargets()
+                let line = TerminalLine(text: "Switched to \(targetLabel(target))", type: .system)
+                terminalBuffer.append(line)
+                recentTerminalLines = terminalBuffer.getLast(15)
+                pendingTerminalLines.append(line)
+                scheduleBatchSend()
+                reconnectStream()
+            } catch {
+                let line = TerminalLine(text: "Target switch failed: \(error.localizedDescription)", type: .error)
+                terminalBuffer.append(line)
+                recentTerminalLines = terminalBuffer.getLast(15)
+            }
+        }
     }
 
     private func handleBridgeEvent(_ event: SSEClient.SSEEvent) {
@@ -609,6 +647,13 @@ final class RelayService: ObservableObject {
         case .disconnected: return .ended
         case .iPhoneUnreachable: return .idle
         }
+    }
+
+    private func targetLabel(_ target: BridgeTarget) -> String {
+        if !target.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "\(target.id) \(target.title)"
+        }
+        return "\(target.id) \(target.command)"
     }
 
     // MARK: - Terminal batching

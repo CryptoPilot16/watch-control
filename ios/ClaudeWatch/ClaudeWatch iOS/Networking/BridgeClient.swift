@@ -1,5 +1,18 @@
 import Foundation
 
+struct BridgeTarget: Identifiable, Decodable, Equatable {
+    let id: String
+    let command: String
+    let path: String
+    let title: String
+    let active: Bool
+}
+
+struct BridgeTargetsResponse: Decodable {
+    let activeTarget: String?
+    let targets: [BridgeTarget]
+}
+
 /// HTTP client for communicating with the Claude Watch bridge server.
 final class BridgeClient {
 
@@ -117,6 +130,14 @@ final class BridgeClient {
         try await authenticatedPost(path: "command", body: body)
     }
 
+    func fetchTargets() async throws -> BridgeTargetsResponse {
+        try await authenticatedGet(path: "targets")
+    }
+
+    func selectTarget(_ target: String) async throws {
+        try await authenticatedPost(path: "target", body: ["target": target])
+    }
+
     /// Responds to an approval request.
     func respondToApproval(requestId: String, allow: Bool) async throws {
         var decision: [String: Any] = [
@@ -167,6 +188,21 @@ final class BridgeClient {
     }
 
     // MARK: - Private helpers
+
+    private func authenticatedGet<T: Decodable>(path: String) async throws -> T {
+        guard let baseURL, let token else { throw BridgeError.networkError }
+        let url = baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await performRequest(request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw BridgeError.serverError("Request failed")
+        }
+
+        return try JSONDecoder().decode(T.self, from: data)
+    }
 
     private func authenticatedPost(path: String, body: [String: String]) async throws {
         guard let baseURL, let token else { throw BridgeError.networkError }
@@ -223,9 +259,9 @@ final class BridgeClient {
         let state: String
         let sessionId: String
         let hasPty: Bool
+        let commandTarget: String?
         let sseClients: Int
         let pendingPermissions: Int
         let eventBufferSize: Int
     }
 }
-

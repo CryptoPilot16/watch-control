@@ -148,11 +148,45 @@ struct ConnectionStatusView: View {
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Color.subtleText)
             }
+
+            if !relayService.terminalTargets.isEmpty {
+                targetPicker
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(Color.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var targetPicker: some View {
+        Menu {
+            ForEach(relayService.terminalTargets) { target in
+                Button {
+                    relayService.selectTarget(target)
+                } label: {
+                    Label(targetMenuLabel(target), systemImage: target.active ? "checkmark" : "terminal")
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 11))
+                Text(activeTargetLabel)
+                    .font(.system(size: 13, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Color.subtleText)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(Color.black.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Command input
@@ -452,6 +486,24 @@ struct ConnectionStatusView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         }
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private var activeTargetLabel: String {
+        if let active = relayService.terminalTargets.first(where: { $0.active }) {
+            return targetMenuLabel(active)
+        }
+        if let target = relayService.activeTerminalTarget {
+            return target
+        }
+        return "No Claude session"
+    }
+
+    private func targetMenuLabel(_ target: BridgeTarget) -> String {
+        let title = target.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty {
+            return "\(target.id) \(target.command)"
+        }
+        return "\(target.id) \(title)"
     }
 }
 

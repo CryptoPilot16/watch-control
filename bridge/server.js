@@ -25,6 +25,7 @@ const CONFIGURED_COMMAND_TARGET = process.env.WATCHCONTROL_TMUX_TARGET || proces
 const TMUX_MIRROR_INTERVAL_MS = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_INTERVAL_MS, 10) || 1_000;
 const TMUX_MIRROR_HISTORY_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_HISTORY_LINES, 10) || 80;
 const TMUX_MIRROR_EMIT_LINES = parseInt(process.env.WATCHCONTROL_TMUX_MIRROR_EMIT_LINES, 10) || 20;
+const MAX_AGENT_TARGETS = parseInt(process.env.WATCHCONTROL_MAX_TARGETS, 10) || 4;
 const AGENT_COMMAND_RE = /^(claude|codex)$/;
 
 const sessionTokens = new Set();
@@ -41,6 +42,7 @@ const pendingPermissionBodies = new Map();
 let tmuxMirrorTimer = null;
 let tmuxMirrorBusy = false;
 let tmuxMirrorTarget = null;
+let activeCommandTarget = CONFIGURED_COMMAND_TARGET;
 let tmuxMirrorLines = [];
 let tmuxMirrorActive = false;
 let tmuxMirrorLastError = null;
@@ -120,21 +122,47 @@ function execFilePromise(command, args) {
 
 async function resolveCommandTarget(requestedTarget) {
   if (requestedTarget) return requestedTarget;
-  if (CONFIGURED_COMMAND_TARGET) return CONFIGURED_COMMAND_TARGET;
+  if (activeCommandTarget) return activeCommandTarget;
 
+  const targets = await listAgentTargets();
+  const preferred = targets[0];
+  if (!preferred) throw new Error("No Claude/Codex tmux pane available");
+  activeCommandTarget = preferred.id;
+  return preferred.id;
+}
+
+async function listAgentTargets() {
   const stdout = await execFilePromise("tmux", [
     "list-panes",
     "-a",
     "-F",
-    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}",
+    "#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}",
   ]);
-  const panes = stdout.trim().split("\n").filter(Boolean).map((line) => {
-    const [target, command = ""] = line.split("\t");
-    return { target, command: command.toLowerCase() };
-  });
-  const preferred = panes.find((pane) => AGENT_COMMAND_RE.test(pane.command));
-  if (!preferred) throw new Error("No Claude/Codex tmux pane available");
-  return preferred.target;
+  return stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [id, command = "", path = "", title = ""] = line.split("\t");
+      return { id, command: command.toLowerCase(), path, title };
+    })
+    .filter((pane) => AGENT_COMMAND_RE.test(pane.command))
+    .slice(0, MAX_AGENT_TARGETS);
+}
+
+async function setActiveCommandTarget(target) {
+  const targets = await listAgentTargets();
+  const selected = targets.find((item) => item.id === target);
+  if (!selected) throw new Error(`Target ${target} is not an active Claude/Codex pane`);
+
+  activeCommandTarget = selected.id;
+  tmuxMirrorTarget = selected.id;
+  tmuxMirrorLines = [];
+  tmuxMirrorActive = false;
+  tmuxMirrorLastError = null;
+  log("info", `Active tmux target: ${selected.id}`);
+  scheduleTmuxMirrorRefresh();
+  return selected;
 }
 
 function sendTmuxCommand(target, command) {
@@ -256,6 +284,26 @@ function scheduleTmuxMirrorRefresh() {
         tmuxMirrorLastError = err.message;
       });
     }, delay);
+  }
+}
+
+async function pushTmuxSnapshotEvent() {
+  if (tmuxMirrorBusy) return;
+
+  tmuxMirrorBusy = true;
+  try {
+    const target = await resolveMirrorTarget();
+    tmuxMirrorTarget = target;
+    const stdout = await captureTmuxPane(target);
+    const nextLines = normalizeTmuxCapture(stdout);
+    tmuxMirrorLines = nextLines;
+    tmuxMirrorActive = true;
+    tmuxMirrorLastError = null;
+    const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
+    if (!snapshot.length) return;
+    pushSseEvent("pty-output", { text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target });
+  } finally {
+    tmuxMirrorBusy = false;
   }
 }
 
@@ -389,6 +437,45 @@ async function handleCommand(req, res) {
   return jsonResponse(res, 400, { error: "Missing permissionId+decision or command" });
 }
 
+async function handleTargets(req, res) {
+  if (req.method !== "GET") return jsonResponse(res, 405, { error: "Method not allowed" });
+  if (!requireAuth(req)) return jsonResponse(res, 401, { error: "Unauthorized" });
+
+  try {
+    const targets = await listAgentTargets();
+    if (!activeCommandTarget && targets[0]) activeCommandTarget = targets[0].id;
+    return jsonResponse(res, 200, {
+      activeTarget: activeCommandTarget,
+      targets: targets.map((target) => ({
+        ...target,
+        active: target.id === activeCommandTarget,
+      })),
+    });
+  } catch (err) {
+    return jsonResponse(res, 500, { error: err.message });
+  }
+}
+
+async function handleTarget(req, res) {
+  if (req.method !== "POST") return jsonResponse(res, 405, { error: "Method not allowed" });
+  if (!requireAuth(req)) return jsonResponse(res, 401, { error: "Unauthorized" });
+
+  let body;
+  try { body = await readBody(req); } catch { return jsonResponse(res, 400, { error: "Invalid JSON" }); }
+  if (!body.target || typeof body.target !== "string") return jsonResponse(res, 400, { error: "Missing target" });
+
+  try {
+    const selected = await setActiveCommandTarget(body.target);
+    pushTmuxSnapshotEvent().catch((err) => {
+      tmuxMirrorActive = false;
+      tmuxMirrorLastError = err.message;
+    });
+    return jsonResponse(res, 200, { ok: true, activeTarget: selected.id });
+  } catch (err) {
+    return jsonResponse(res, 400, { error: err.message });
+  }
+}
+
 function handleEvents(req, res) {
   if (req.method !== "GET") return jsonResponse(res, 405, { error: "Method not allowed" });
   if (!requireAuth(req)) return jsonResponse(res, 401, { error: "Unauthorized" });
@@ -501,7 +588,7 @@ function handleStatus(_req, res) {
     state: sessionState,
     sessionId: SESSION_ID,
     hasPty: true,
-    commandTarget: CONFIGURED_COMMAND_TARGET || "auto",
+    commandTarget: activeCommandTarget || "auto",
     terminalMirror: {
       active: tmuxMirrorActive,
       target: tmuxMirrorTarget || CONFIGURED_COMMAND_TARGET || "auto",
@@ -518,6 +605,8 @@ function handleStatus(_req, res) {
 const routes = {
   "POST /pair": handlePair,
   "POST /command": handleCommand,
+  "GET /targets": handleTargets,
+  "POST /target": handleTarget,
   "GET /events": handleEvents,
   "POST /hooks/permission": handleHookPermission,
   "POST /hooks/tool-output": handleHookToolOutput,
