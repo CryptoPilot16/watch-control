@@ -38,7 +38,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cryptopilot.watchcontrol.watchkitapp
         INFOPLIST_FILE: "ClaudeWatch watchOS/Info.plist"
-        PRODUCT_NAME: watch-control
+        # PRODUCT_NAME is intentionally distinct from the iOS target so the
+        # Embed Watch Content phase can unambiguously resolve the watch app
+        # bundle. The user-visible label still says "watch-control" because
+        # CFBundleDisplayName in Info.plist controls the watch home screen.
+        PRODUCT_NAME: watchcontrol-watchapp
         GENERATE_INFOPLIST_FILE: false
         SUPPORTS_MACCATALYST: false
         ARCHS: "arm64 arm64e arm64_32"
