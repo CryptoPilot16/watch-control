@@ -8,6 +8,7 @@ import Combine
 ///
 /// Conforms to `ObservableObject` so SwiftUI views can observe connectivity changes.
 final class WatchSessionManager: NSObject, ObservableObject {
+    private let maxPayloadBytes = 60_000
 
     // MARK: - Singleton
 
@@ -71,10 +72,18 @@ final class WatchSessionManager: NSObject, ObservableObject {
         }
 
         let dictionary = message.toDictionary()
+        if isPayloadTooLarge(dictionary) {
+            errorHandler?(WatchSessionError.payloadTooLarge)
+            return
+        }
 
         if session.isReachable {
             session.sendMessage(dictionary, replyHandler: replyHandler) { error in
                 // sendMessage failed; fall back to transferUserInfo
+                if self.isPayloadTooLarge(dictionary) {
+                    errorHandler?(WatchSessionError.payloadTooLarge)
+                    return
+                }
                 session.transferUserInfo(dictionary)
                 errorHandler?(error)
             }
@@ -101,7 +110,13 @@ final class WatchSessionManager: NSObject, ObservableObject {
             return
         }
 
-        session.sendMessage(message.toDictionary(), replyHandler: replyHandler, errorHandler: errorHandler)
+        let dictionary = message.toDictionary()
+        if isPayloadTooLarge(dictionary) {
+            errorHandler?(WatchSessionError.payloadTooLarge)
+            return
+        }
+
+        session.sendMessage(dictionary, replyHandler: replyHandler, errorHandler: errorHandler)
     }
 
     /// Updates the application context with the current connection state.
@@ -139,6 +154,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
     enum WatchSessionError: LocalizedError {
         case sessionNotSupported
         case counterpartNotReachable
+        case payloadTooLarge
 
         var errorDescription: String? {
             switch self {
@@ -146,8 +162,17 @@ final class WatchSessionManager: NSObject, ObservableObject {
                 return "WCSession is not supported on this device."
             case .counterpartNotReachable:
                 return "Open the iPhone app to send commands from Apple Watch."
+            case .payloadTooLarge:
+                return "Voice clip is too long. Keep it under about 5 seconds."
             }
         }
+    }
+
+    private func isPayloadTooLarge(_ dictionary: [String: Any]) -> Bool {
+        guard let data = try? JSONSerialization.data(withJSONObject: dictionary) else {
+            return false
+        }
+        return data.count > maxPayloadBytes
     }
 }
 

@@ -355,16 +355,17 @@ private final class WatchAudioRecorder: NSObject, ObservableObject {
 
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.record, mode: .measurement)
+            try audioSession.setCategory(.record, mode: .default)
             try audioSession.setActive(true)
 
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("watch-command-\(UUID().uuidString).m4a")
             let settings: [String: Any] = [
                 AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 16_000,
+                AVSampleRateKey: 12_000,
                 AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+                AVEncoderBitRateKey: 16_000,
+                AVEncoderAudioQualityKey: AVAudioQuality.low.rawValue
             ]
 
             let recorder = try AVAudioRecorder(url: url, settings: settings)

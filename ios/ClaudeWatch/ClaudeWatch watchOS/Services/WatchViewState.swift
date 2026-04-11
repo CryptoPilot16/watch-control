@@ -551,8 +551,22 @@ class WatchViewState: ObservableObject {
     }
 
     private func sendAudioViaIPhoneRelay(_ audioData: Data, target: String?, fallbackError: Error? = nil) {
+        if audioData.count > 48_000 {
+            setRelayStatus("Voice clip too long. Hold less and try again.", isError: true, targetId: target)
+            return
+        }
+        if audioData.count < 256 {
+            setRelayStatus("Voice clip too short. Hold to record.", isError: true, targetId: target)
+            return
+        }
+
         let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: target)
-        sessionManager.send(.voiceAudioCommand(command), errorHandler: { error in
+        setRelayStatus("Sending voice…", isError: false, targetId: target)
+        sessionManager.send(.voiceAudioCommand(command), replyHandler: { _ in
+            DispatchQueue.main.async {
+                self.setRelayStatus("Voice sent", isError: false, targetId: target)
+            }
+        }, errorHandler: { error in
             DispatchQueue.main.async {
                 self.setRelayStatus(
                     fallbackError?.localizedDescription ?? error.localizedDescription,
@@ -561,7 +575,6 @@ class WatchViewState: ObservableObject {
                 )
             }
         })
-        setRelayStatus("Sent voice to iPhone relay", isError: false, targetId: target)
     }
 
     private func setRelayStatus(_ text: String, isError: Bool, targetId: String?) {
