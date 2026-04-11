@@ -7,12 +7,12 @@
 
 ![watch-control landing page](assets/preview.png)
 
-Your AI agent runs on a remote Linux server inside `tmux`. When it needs approval, the request reaches your Apple Watch instantly — either via a native watchOS app over Tailscale, or via Pushover push notification as a fallback. A single tap approves or denies, and your agent continues.
+Your AI agent runs on a remote Linux server inside `tmux`. When it needs approval, the request reaches your Apple Watch instantly through the native app stack (bridge → iPhone app → watchOS app). If you configure Pushover, it can also notify as a fallback path. A single tap approves or denies, and your agent continues.
 
 Supports Codex and Claude Code side-by-side, with two delivery paths:
 
-- **Native Apple Watch app** — connects to a bridge server over Tailscale, shows the prompt on your wrist with Approve/Deny buttons
-- **Pushover notifications** — optional fallback that works without the native app
+- **Native iPhone + Apple Watch app** — bridge approvals relayed to iPhone/watch, with local notifications when the app is backgrounded
+- **Pushover notifications** — optional fallback when native delivery isn't enough for your setup
 
 ---
 
@@ -71,7 +71,7 @@ watch-control/
 
 ## Quick start
 
-**Prerequisites:** Linux server with tmux + Python 3 + Node.js 18+, [Tailscale](https://tailscale.com), and either an Apple Watch with the native app sideloaded, or a [Pushover](https://pushover.net) account.
+**Prerequisites:** Linux server with tmux + Python 3 + Node.js 18+, [Tailscale](https://tailscale.com), and an Apple Watch with the native app sideloaded. Pushover is optional.
 
 ```bash
 git clone https://github.com/CryptoPilot16/watch-control.git watch-control
@@ -98,6 +98,12 @@ A two-target SwiftUI app: an **iPhone app** that holds the bridge connection and
 - The **iPhone app** does the actual Tailscale → bridge HTTP/SSE work and shows the prompt directly when the watch isn't paired or reachable.
 - The **watchOS app** receives state and approval requests from the iPhone over `WCSession` (no internet on the watch required), and lets you tap Approve/Deny on your wrist.
 
+### Notification behavior
+
+- If the iPhone app is in the background/minimized (including screen sleeping), approval prompts are still surfaced via local notifications.
+- If the iPhone app is force-quit by the user, iOS may suspend delivery until you open it again.
+- Optional: configure Pushover as an additional fallback path so Claude/Codex approvals can still ping you when the native app process is not active.
+
 Source lives in [`ios/`](ios/) — open `ios/ClaudeWatch/ClaudeWatch.xcodeproj` in Xcode.
 
 **Setup:**
@@ -121,13 +127,15 @@ Source lives in [`ios/`](ios/) — open `ios/ClaudeWatch/ClaudeWatch.xcodeproj` 
 |---|---|---|---|
 | `APPROVE_SECRET` | yes | — | Shared secret for webhook auth |
 | `BRIDGE_URL` | no | `http://100.x.x.x:7860` | Bridge server URL (Tailscale IP) |
-| `PUSHOVER_APP_TOKEN` | no | — | Pushover app token (fallback notifications) |
-| `PUSHOVER_USER_KEY` | no | — | Pushover user key (fallback notifications) |
+| `PUSHOVER_APP_TOKEN` | no | — | Pushover app token (optional fallback notifications from bridge/watcher) |
+| `PUSHOVER_USER_KEY` | no | — | Pushover user key (optional fallback notifications from bridge/watcher) |
+| `PUSHOVER_DEVICE` | no | — | Optional Pushover device name |
 | `TMUX_SESSION` | no | `codex:0.0` | Default tmux target pane |
 | `TMUX_TARGETS` | no | `$TMUX_SESSION` | Space-separated list of panes to watch |
 | `WATCHCONTROL_TMUX_TARGET` | no | auto-detected | tmux pane that typed/spoken watch commands are sent to |
 | `APPROVE_PORT` | no | `8787` | Webhook listening port |
 | `COOLDOWN_SECONDS` | no | `30` | Min seconds between push notifications |
+| `WATCHCONTROL_NOTIFY_COOLDOWN_MS` | no | `30000` | Bridge push cooldown for approval notifications |
 
 ---
 
