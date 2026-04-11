@@ -227,6 +227,23 @@ function startTmuxMirror() {
   });
 }
 
+async function sendTmuxSnapshot(client) {
+  const target = await resolveCommandTarget(tmuxMirrorTarget);
+  tmuxMirrorTarget = target;
+  const stdout = await captureTmuxPane(target);
+  const nextLines = normalizeTmuxCapture(stdout);
+  tmuxMirrorLines = nextLines;
+  tmuxMirrorActive = true;
+  tmuxMirrorLastError = null;
+  const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
+  if (!snapshot.length) return;
+
+  client.write(formatSseMessage({
+    event: "pty-output",
+    data: JSON.stringify({ text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target }),
+  }));
+}
+
 function pushSseEvent(event, data) {
   sseEventId++;
   const entry = { id: sseEventId, event, data: typeof data === "string" ? data : JSON.stringify(data) };
@@ -243,7 +260,7 @@ function pushSseEvent(event, data) {
 }
 
 function formatSseMessage(entry) {
-  let msg = `id: ${entry.id}\n`;
+  let msg = entry.id ? `id: ${entry.id}\n` : "";
   msg += `event: ${entry.event}\n`;
   for (const line of entry.data.split("\n")) {
     msg += `data: ${line}\n`;
@@ -353,6 +370,12 @@ function handleEvents(req, res) {
   }
   sseClients.add(res);
   log("info", `SSE client connected (total: ${sseClients.size})`);
+  if (!lastIdHeader) {
+    sendTmuxSnapshot(res).catch((err) => {
+      tmuxMirrorActive = false;
+      tmuxMirrorLastError = err.message;
+    });
+  }
   const heartbeat = setInterval(() => {
     try { res.write(":heartbeat\n\n"); } catch {
       clearInterval(heartbeat);
