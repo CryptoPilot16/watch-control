@@ -479,7 +479,7 @@ struct ConnectionStatusView: View {
 
     private func terminalPageView(_ page: TerminalPage) -> some View {
         let theme = theme(forPageId: page.id)
-        ScrollViewReader { proxy in
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(lines(for: page.id)) { line in
