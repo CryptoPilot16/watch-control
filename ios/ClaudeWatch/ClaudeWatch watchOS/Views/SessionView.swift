@@ -56,7 +56,7 @@ struct SessionView: View {
             }
 
             Button { showVoiceInput = true } label: {
-                Label("Command", systemImage: "mic.fill")
+                Label("Speak", systemImage: "mic.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity)

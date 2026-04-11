@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 // MARK: - VoiceInputView
 
@@ -9,7 +10,8 @@ struct VoiceInputView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var commandText = ""
-    @State private var showError = false
+    @State private var errorMessage: String?
+    @State private var isDictating = false
     @State private var animationPhase: CGFloat = 0
     @FocusState private var isTextFieldFocused: Bool
 
@@ -37,9 +39,21 @@ struct VoiceInputView: View {
                     animationPhase += 1
                 }
 
-                // watchOS dictation-enabled TextField — tapping the mic icon
-                // on the keyboard triggers system dictation automatically.
-                TextField("Tap mic or type...", text: $commandText)
+                Button {
+                    startDictation()
+                } label: {
+                    Label(isDictating ? "Listening" : "Speak", systemImage: "mic.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(Theme.Text.primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(isDictating)
+
+                TextField("Or type command", text: $commandText)
                     .font(.system(size: 15, design: .monospaced))
                     .foregroundColor(Theme.Text.primary)
                     .textFieldStyle(.plain)
@@ -47,6 +61,13 @@ struct VoiceInputView: View {
                     .onSubmit {
                         sendCommand()
                     }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.Accent.error)
+                        .multilineTextAlignment(.center)
+                }
 
                 if !commandText.isEmpty {
                     // Send button
@@ -79,8 +100,7 @@ struct VoiceInputView: View {
             .padding(.vertical, 8)
         }
         .onAppear {
-            // Auto-focus the text field to bring up keyboard/dictation
-            isTextFieldFocused = true
+            isTextFieldFocused = false
         }
     }
 
@@ -89,6 +109,33 @@ struct VoiceInputView: View {
         let variation: CGFloat = 20
         let phase = animationPhase + CGFloat(index) * 2
         return base + abs(sin(phase * 0.3)) * variation
+    }
+
+    private func startDictation() {
+        guard !isDictating else { return }
+        guard let controller = WKExtension.shared().visibleInterfaceController else {
+            errorMessage = "Could not open dictation"
+            return
+        }
+
+        errorMessage = nil
+        isDictating = true
+        controller.presentTextInputController(
+            withSuggestions: nil,
+            allowedInputMode: .plain
+        ) { results in
+            DispatchQueue.main.async {
+                isDictating = false
+
+                guard let text = results?.compactMap({ $0 as? String }).first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !text.isEmpty
+                else { return }
+
+                commandText = text
+                sendCommand()
+            }
+        }
     }
 
     private func sendCommand() {
