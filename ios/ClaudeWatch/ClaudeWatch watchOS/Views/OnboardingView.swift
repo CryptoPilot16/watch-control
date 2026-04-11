@@ -37,7 +37,7 @@ struct OnboardingView: View {
                         if filtered != newValue { code = filtered }
                     }
 
-                Text("IP \(ipAddress)")
+                Text("Bridge \(ipAddress)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Theme.Text.secondary)
                     .lineLimit(1)
@@ -60,7 +60,7 @@ struct OnboardingView: View {
                         .scaleEffect(0.7)
                 }
 
-                TextField("Edit IP", text: $ipAddress)
+                TextField("Edit bridge", text: $ipAddress)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(Theme.Text.primary)
                     .multilineTextAlignment(.center)
@@ -85,11 +85,28 @@ struct OnboardingView: View {
     }
 
     private func connectManual() async -> URL? {
-        let ip = ipAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ip.isEmpty else { return nil }
-        UserDefaults.standard.set(ip, forKey: "bridge_host")
+        let bridge = ipAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bridge.isEmpty else { return nil }
+        UserDefaults.standard.set(bridge, forKey: "bridge_host")
         error = nil
 
+        if bridge.hasPrefix("http://") || bridge.hasPrefix("https://") {
+            guard let baseURL = URL(string: bridge) else { return nil }
+            let statusURL = baseURL.appendingPathComponent("status")
+            var request = URLRequest(url: statusURL)
+            request.timeoutInterval = 3
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                    return baseURL
+                }
+            } catch {
+                return nil
+            }
+            return nil
+        }
+
+        let ip = bridge
         for port in 7860...7869 {
             let url = URL(string: "http://\(ip):\(port)/status")!
             var request = URLRequest(url: url)
