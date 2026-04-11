@@ -438,7 +438,7 @@ struct ConnectionStatusView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Terminal")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Color.subtleText)
                 Spacer()
                 Text("\(relayService.recentTerminalLines.count) lines")
@@ -454,22 +454,27 @@ struct ConnectionStatusView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: terminalPages.count > 1 ? .always : .never))
             .frame(maxWidth: .infinity)
-            .frame(height: 260)
-            .background(Color.cardBackground)
+            .frame(height: 280)
+            .background(Color(hex: "0f1115"))
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.claudeOrange.opacity(0.35), lineWidth: 1)
+            )
         }
     }
 
     private func terminalPageView(_ page: TerminalPage) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
+                LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(lines(for: page.id)) { line in
                         terminalLineView(line)
                             .id(line.id)
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
                 .padding(.bottom, terminalPages.count > 1 ? 18 : 0)
             }
             .onChange(of: relayService.recentTerminalLines.count) { _, _ in
@@ -490,11 +495,42 @@ struct ConnectionStatusView: View {
         }
     }
 
+    @ViewBuilder
     private func terminalLineView(_ line: TerminalLine) -> some View {
-        Text(line.text)
-            .font(.system(size: 13, weight: .regular, design: .monospaced))
-            .foregroundStyle(colorForTerminalLine(line))
-            .frame(maxWidth: .infinity, alignment: .leading)
+        let displayType = displayType(for: line)
+        switch displayType {
+        case .command:
+            HStack(spacing: 6) {
+                Text("›")
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text(line.text)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(colorForLineType(displayType))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 22)
+            .background(Color(hex: "3a3b40"))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+
+        case .output:
+            HStack(alignment: .top, spacing: 6) {
+                Text("•")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text(line.text)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(colorForLineType(displayType))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        default:
+            Text(line.text)
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .foregroundStyle(colorForLineType(displayType))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, pageId: String) {
@@ -503,8 +539,22 @@ struct ConnectionStatusView: View {
         }
     }
 
-    private func colorForTerminalLine(_ line: TerminalLine) -> Color {
-        return colorForLineType(line.type)
+    private func displayType(for line: TerminalLine) -> TerminalLine.LineType {
+        if line.type == .output && looksLikePromptLine(line.text) {
+            return .command
+        }
+        return line.type
+    }
+
+    private func looksLikePromptLine(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(">") || trimmed.hasPrefix("$") {
+            return true
+        }
+        if trimmed.hasPrefix("/") && trimmed.count > 1 {
+            return true
+        }
+        return false
     }
 
     private func colorForLineType(_ type: TerminalLine.LineType) -> Color {
