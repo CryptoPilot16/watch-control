@@ -64,16 +64,16 @@ struct SessionView: View {
 
     private var commandBar: some View {
         VStack(spacing: 2) {
-            HStack(spacing: 4) {
+            HStack(spacing: 3) {
                 Circle()
                     .fill(targetColor)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 5, height: 5)
                 TextField("Type or speak", text: $commandText)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(targetColor)
                     .textFieldStyle(.plain)
-                    .padding(.horizontal, 6)
-                    .frame(height: 30)
+                    .padding(.horizontal, 5)
+                    .frame(height: 26)
                     .background(Theme.Background.overlay)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .onSubmit {
@@ -85,21 +85,21 @@ struct SessionView: View {
 
             if let statusText = commandStatusText {
                 Text(statusText)
-                    .font(.system(size: 10))
-                    .foregroundColor(commandError == nil ? Theme.Text.secondary : Theme.Accent.error)
-                    .lineLimit(2)
+                    .font(.system(size: 9))
+                    .foregroundColor(commandStatusIsError ? Theme.Accent.error : Theme.Text.secondary)
+                    .lineLimit(1)
                     .multilineTextAlignment(.center)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 3)
+        .padding(.bottom, 1)
     }
 
     private var actionButton: some View {
         Image(systemName: actionButtonIcon)
             .font(.system(size: 13, weight: .semibold))
             .foregroundColor(.black)
-            .frame(width: 30, height: 30)
+            .frame(width: 26, height: 26)
             .background(actionButtonColor)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
@@ -132,7 +132,7 @@ struct SessionView: View {
                     }
                 }
                 .padding(.horizontal, 4)
-                .padding(.bottom, session.terminalPages.count > 1 ? 8 : 0)
+                .padding(.bottom, session.terminalPages.count > 1 ? 6 : 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: session.terminalLines.count) { _, _ in
@@ -197,7 +197,11 @@ struct SessionView: View {
         if isStartingRecording {
             return "Starting mic..."
         }
-        return nil
+        return session.commandStatusText(for: terminalPageSelection.wrappedValue)
+    }
+
+    private var commandStatusIsError: Bool {
+        commandError != nil || (!audioRecorder.isRecording && !isStartingRecording && session.commandStatusIsError)
     }
 
     private var actionButtonIcon: String {

@@ -13,6 +13,8 @@ class WatchViewState: ObservableObject {
     @Published var isReachable: Bool = false
     @Published var selectedTerminalTarget: String?
     @Published var pastedCommandText: String?
+    @Published private var relayStatusText: String?
+    @Published private var relayStatusIsError = false
 
     private let bridge = WatchBridgeClient.shared
     private let sessionManager = WatchSessionManager.shared
@@ -21,6 +23,7 @@ class WatchViewState: ObservableObject {
     private var lastEventId: Int = 0
     private var sseTask: URLSessionDataTask?
     private var companionRelayActive = false
+    private var relayStatusTargetId: String?
 
     private init() {
         setupCompanionRelay()
@@ -74,7 +77,7 @@ class WatchViewState: ObservableObject {
 
         case .commandStatus(let status):
             companionRelayActive = true
-            appendLine(TerminalLine(text: status.message, type: status.isError ? .error : .system))
+            setRelayStatus(status.message, isError: status.isError, targetId: status.targetId ?? currentTerminalTarget)
 
         case .pasteResponse(let response):
             companionRelayActive = true
@@ -153,6 +156,15 @@ class WatchViewState: ObservableObject {
 
     func selectTerminalPage(_ targetId: String) {
         selectedTerminalTarget = targetId
+    }
+
+    func commandStatusText(for targetId: String) -> String? {
+        guard relayStatusTargetId == nil || relayStatusTargetId == targetId else { return nil }
+        return relayStatusText
+    }
+
+    var commandStatusIsError: Bool {
+        relayStatusIsError
     }
 
     func requestPaste() {
@@ -421,15 +433,15 @@ class WatchViewState: ObservableObject {
     // MARK: - Voice command (direct to bridge)
 
     func sendVoiceCommand(_ text: String) {
+        let target = currentTerminalTarget
         if companionRelayActive {
-            let command = WatchMessage.VoiceCommand(transcribedText: text, targetId: selectedTerminalTarget)
+            let command = WatchMessage.VoiceCommand(transcribedText: text, targetId: target)
             sessionManager.send(.voiceCommand(command))
-            appendLine(TerminalLine(text: "Sent: \(text)", type: .command, targetId: selectedTerminalTarget))
             return
         }
 
         guard let baseURL = bridge.baseURL, let token = bridge.token else {
-            appendLine(TerminalLine(text: "iPhone relay not reachable", type: .error))
+            appendLine(TerminalLine(text: "iPhone relay not reachable", type: .error, targetId: target))
             return
         }
 
@@ -439,25 +451,22 @@ class WatchViewState: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         var body = ["command": text + "\n"]
-        if let selectedTerminalTarget {
-            body["target"] = selectedTerminalTarget
+        if let target {
+            body["target"] = target
         }
         request.httpBody = try? JSONEncoder().encode(body)
 
         URLSession.shared.dataTask(with: request) { _, _, error in
             if let error { print("[WatchViewState] Command send failed: \(error)") }
         }.resume()
-        appendLine(TerminalLine(text: "Sent: \(text)", type: .command, targetId: selectedTerminalTarget))
     }
 
     func sendAudioCommand(_ audioData: Data) {
-        let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: selectedTerminalTarget)
-        appendLine(TerminalLine(text: "Voice sent to iPhone", type: .system, targetId: selectedTerminalTarget))
-        sessionManager.send(.voiceAudioCommand(command)) { _ in
-            self.appendLine(TerminalLine(text: "iPhone received voice", type: .system, targetId: self.selectedTerminalTarget))
-        } errorHandler: { error in
-            self.appendLine(TerminalLine(text: "Voice send failed: \(error.localizedDescription)", type: .error, targetId: self.selectedTerminalTarget))
-        }
+        let target = currentTerminalTarget
+        let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: target)
+        sessionManager.send(.voiceAudioCommand(command), errorHandler: { error in
+            self.appendLine(TerminalLine(text: "Voice send failed: \(error.localizedDescription)", type: .error, targetId: target))
+        })
     }
 
     // MARK: - Token rejected (bridge restarted)
@@ -487,6 +496,24 @@ class WatchViewState: ObservableObject {
             return
         }
         selectedTerminalTarget = state.targetId ?? state.terminalPages.first?.id
+    }
+
+    private var currentTerminalTarget: String? {
+        selectedTerminalTarget ?? sessionState.targetId ?? sessionState.terminalPages.first?.id
+    }
+
+    private func setRelayStatus(_ text: String, isError: Bool, targetId: String?) {
+        relayStatusText = text
+        relayStatusIsError = isError
+        relayStatusTargetId = targetId
+
+        guard !isError else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard self?.relayStatusText == text,
+                  self?.relayStatusTargetId == targetId else { return }
+            self?.relayStatusText = nil
+            self?.relayStatusTargetId = nil
+        }
     }
 }
 

@@ -644,9 +644,9 @@ final class RelayService: ObservableObject {
             Task {
                 do {
                     try await sendCommand(cmd.transcribedText, target: cmd.targetId)
-                    sendCommandStatus("Sent: \(cmd.transcribedText)")
+                    sendCommandStatus("Sent", targetId: cmd.targetId)
                 } catch {
-                    sendCommandStatus("Send failed: \(error.localizedDescription)", isError: true)
+                    sendCommandStatus("Send failed: \(error.localizedDescription)", isError: true, targetId: cmd.targetId)
                 }
             }
 
@@ -684,16 +684,16 @@ final class RelayService: ObservableObject {
             let text = try await transcribeWatchAudio(command.audioData)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
-                appendLocalLine(TerminalLine(text: "Watch voice was empty", type: .system))
+                appendLocalLine(TerminalLine(text: "Watch voice was empty", type: .system, targetId: command.targetId))
                 return
             }
 
-            sendCommandStatus("Heard: \(text)")
+            sendCommandStatus("Heard: \(text)", targetId: command.targetId)
             try await sendCommand(text, target: command.targetId)
-            sendCommandStatus("Sent voice command")
+            sendCommandStatus("Sent voice command", targetId: command.targetId)
         } catch {
-            appendLocalLine(TerminalLine(text: "Watch voice failed: \(error.localizedDescription)", type: .error))
-            sendCommandStatus("Voice failed: \(error.localizedDescription)", isError: true)
+            appendLocalLine(TerminalLine(text: "Watch voice failed: \(error.localizedDescription)", type: .error, targetId: command.targetId))
+            sendCommandStatus("Voice failed: \(error.localizedDescription)", isError: true, targetId: command.targetId)
         }
     }
 
@@ -749,8 +749,12 @@ final class RelayService: ObservableObject {
         scheduleBatchSend()
     }
 
-    private func sendCommandStatus(_ message: String, isError: Bool = false) {
-        sessionManager.send(.commandStatus(WatchMessage.CommandStatus(message: message, isError: isError)))
+    private func sendCommandStatus(_ message: String, isError: Bool = false, targetId: String? = nil) {
+        sessionManager.send(.commandStatus(WatchMessage.CommandStatus(
+            message: message,
+            isError: isError,
+            targetId: targetId
+        )))
     }
 
     private func sendPasteResponseToWatch() {

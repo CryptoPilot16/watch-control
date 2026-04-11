@@ -54,6 +54,13 @@ enum WatchMessage: Codable {
     struct CommandStatus: Codable {
         let message: String
         let isError: Bool
+        let targetId: String?
+
+        init(message: String, isError: Bool = false, targetId: String? = nil) {
+            self.message = message
+            self.isError = isError
+            self.targetId = targetId
+        }
     }
 
     struct PasteRequest: Codable {
