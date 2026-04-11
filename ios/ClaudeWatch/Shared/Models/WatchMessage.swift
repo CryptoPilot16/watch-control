@@ -10,6 +10,7 @@ enum WatchMessage: Codable {
     // Watch -> iPhone
     case voiceCommand(VoiceCommand)
     case voiceAudioCommand(VoiceAudioCommand)
+    case commandStatus(CommandStatus)
     case approvalResponse(ApprovalResponse)
 
     // iPhone -> Watch
@@ -23,11 +24,13 @@ enum WatchMessage: Codable {
     struct VoiceCommand: Codable {
         let id: UUID
         let transcribedText: String
+        let targetId: String?
         let timestamp: Date
 
-        init(transcribedText: String) {
+        init(transcribedText: String, targetId: String? = nil) {
             self.id = UUID()
             self.transcribedText = transcribedText
+            self.targetId = targetId
             self.timestamp = Date()
         }
     }
@@ -35,13 +38,20 @@ enum WatchMessage: Codable {
     struct VoiceAudioCommand: Codable {
         let id: UUID
         let audioData: Data
+        let targetId: String?
         let timestamp: Date
 
-        init(audioData: Data) {
+        init(audioData: Data, targetId: String? = nil) {
             self.id = UUID()
             self.audioData = audioData
+            self.targetId = targetId
             self.timestamp = Date()
         }
+    }
+
+    struct CommandStatus: Codable {
+        let message: String
+        let isError: Bool
     }
 
     struct ApprovalResponse: Codable {
@@ -87,6 +97,7 @@ enum WatchMessage: Codable {
         switch self {
         case .voiceCommand:           return "voiceCommand"
         case .voiceAudioCommand:      return "voiceAudioCommand"
+        case .commandStatus:          return "commandStatus"
         case .approvalResponse:       return "approvalResponse"
         case .terminalUpdate:         return "terminalUpdate"
         case .approvalRequestMessage: return "approvalRequestMessage"
@@ -134,6 +145,8 @@ enum WatchMessage: Codable {
             try container.encode(cmd, forKey: .payload)
         case .voiceAudioCommand(let cmd):
             try container.encode(cmd, forKey: .payload)
+        case .commandStatus(let status):
+            try container.encode(status, forKey: .payload)
         case .approvalResponse(let resp):
             try container.encode(resp, forKey: .payload)
         case .terminalUpdate(let update):
@@ -156,6 +169,8 @@ enum WatchMessage: Codable {
             self = .voiceCommand(try container.decode(VoiceCommand.self, forKey: .payload))
         case "voiceAudioCommand":
             self = .voiceAudioCommand(try container.decode(VoiceAudioCommand.self, forKey: .payload))
+        case "commandStatus":
+            self = .commandStatus(try container.decode(CommandStatus.self, forKey: .payload))
         case "approvalResponse":
             self = .approvalResponse(try container.decode(ApprovalResponse.self, forKey: .payload))
         case "terminalUpdate":

@@ -27,6 +27,7 @@ struct SessionState: Codable {
     var targetId: String?
     var targetTitle: String?
     var targetColor: String?
+    var terminalPages: [TerminalPage]
 
     enum TransportMode: String, Codable {
         case lan
@@ -45,7 +46,8 @@ struct SessionState: Codable {
         transportMode: TransportMode,
         targetId: String? = nil,
         targetTitle: String? = nil,
-        targetColor: String? = nil
+        targetColor: String? = nil,
+        terminalPages: [TerminalPage] = []
     ) {
         self.connection = connection
         self.activity = activity
@@ -59,6 +61,7 @@ struct SessionState: Codable {
         self.targetId = targetId
         self.targetTitle = targetTitle
         self.targetColor = targetColor
+        self.terminalPages = terminalPages
     }
 
     static var disconnected: SessionState {
@@ -74,4 +77,11 @@ struct SessionState: Codable {
             transportMode: .lan
         )
     }
+}
+
+struct TerminalPage: Codable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let color: String
+    let active: Bool
 }

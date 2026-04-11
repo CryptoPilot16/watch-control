@@ -127,8 +127,11 @@ final class BridgeClient {
     // MARK: - Commands
 
     /// Sends a text command to the bridge PTY.
-    func sendCommand(text: String) async throws {
-        let body = ["command": text]
+    func sendCommand(text: String, target: String? = nil) async throws {
+        var body = ["command": text]
+        if let target {
+            body["target"] = target
+        }
         try await authenticatedPost(path: "command", body: body)
     }
 

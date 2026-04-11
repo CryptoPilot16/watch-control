@@ -27,7 +27,7 @@ final class RelayService: ObservableObject {
     @Published private(set) var lastConnected: Date?
     @Published private(set) var terminalTargets: [BridgeTarget] = []
     @Published private(set) var activeTerminalTarget: String?
-    @Published private(set) var displayedTerminalTargets: Set<String> = []
+    @Published var selectedTerminalTarget: String?
 
     // Permission prompt state
     @Published var pendingPermission: PendingPermission? = nil
@@ -138,7 +138,7 @@ final class RelayService: ObservableObject {
         connectionState = .disconnected
         terminalTargets = []
         activeTerminalTarget = nil
-        displayedTerminalTargets = []
+        selectedTerminalTarget = nil
 
         UserDefaults.standard.removeObject(forKey: "paired_machine_name")
         UserDefaults.standard.removeObject(forKey: "last_connected")
@@ -222,16 +222,21 @@ final class RelayService: ObservableObject {
     func refreshTargets() async {
         guard isPaired else { return }
         do {
-            let response = try await bridgeClient.fetchTargets()
-            terminalTargets = response.targets
-            activeTerminalTarget = response.activeTarget
+            var response = try await bridgeClient.fetchTargets()
+            let allTargets = response.targets.map(\.id)
             let mirroredTargets = response.targets
                 .filter { $0.mirrored == true }
                 .map(\.id)
-            if !mirroredTargets.isEmpty {
-                displayedTerminalTargets = Set(mirroredTargets)
-            } else if let activeTarget = response.activeTarget {
-                displayedTerminalTargets = [activeTarget]
+            if !allTargets.isEmpty && Set(mirroredTargets) != Set(allTargets) {
+                try? await bridgeClient.selectMirrorTargets(allTargets)
+                response = try await bridgeClient.fetchTargets()
+            }
+
+            terminalTargets = response.targets
+            activeTerminalTarget = response.activeTarget
+            let validIds = Set(response.targets.map(\.id))
+            if selectedTerminalTarget == nil || !validIds.contains(selectedTerminalTarget ?? "") {
+                selectedTerminalTarget = response.activeTarget ?? response.targets.first?.id
             }
             refreshRecentTerminalLines()
             updateWatchState()
@@ -259,38 +264,24 @@ final class RelayService: ObservableObject {
         }
     }
 
-    func isTargetDisplayed(_ target: BridgeTarget) -> Bool {
-        if !displayedTerminalTargets.isEmpty {
-            return displayedTerminalTargets.contains(target.id)
-        }
-        return target.mirrored == true
-    }
-
-    func setTargetDisplayed(_ target: BridgeTarget, displayed: Bool) {
-        var targetIds = displayedTerminalTargets
-        if targetIds.isEmpty {
-            targetIds = Set(terminalTargets.filter { $0.mirrored == true }.map(\.id))
-        }
-        if displayed {
-            targetIds.insert(target.id)
-        } else {
-            guard targetIds.count > 1 else { return }
-            targetIds.remove(target.id)
-        }
-        displayedTerminalTargets = targetIds
+    func selectTerminalPage(_ targetId: String) {
+        guard selectedTerminalTarget != targetId else { return }
+        selectedTerminalTarget = targetId
         refreshRecentTerminalLines()
 
+        guard let target = terminalTargets.first(where: { $0.id == targetId }) else { return }
         Task {
-            do {
-                try await bridgeClient.selectMirrorTargets(Array(targetIds))
-                await refreshTargets()
-                refreshRecentTerminalLines()
-            } catch {
-                let line = TerminalLine(text: "Display change failed: \(error.localizedDescription)", type: .error)
-                terminalBuffer.append(line)
-                refreshRecentTerminalLines()
-            }
+            try? await bridgeClient.selectTarget(target.id)
+            await refreshTargets()
         }
+    }
+
+    func terminalLines(for targetId: String, limit: Int = 15) -> [TerminalLine] {
+        let filtered = terminalBuffer.getAll().filter { line in
+            line.targetId == nil || line.targetId == targetId
+        }
+        guard limit < filtered.count else { return filtered }
+        return Array(filtered.suffix(limit))
     }
 
     private func handleBridgeEvent(_ event: SSEClient.SSEEvent) {
@@ -355,9 +346,7 @@ final class RelayService: ObservableObject {
 
         for line in lines {
             terminalBuffer.append(line)
-            if shouldDisplay(line) {
-                pendingTerminalLines.append(line)
-            }
+            pendingTerminalLines.append(line)
         }
         refreshRecentTerminalLines()
 
@@ -494,12 +483,12 @@ final class RelayService: ObservableObject {
 
     // MARK: - Commands
 
-    func sendCommand(_ text: String) async throws {
+    func sendCommand(_ text: String, target: String? = nil) async throws {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else { return }
 
         do {
-            try await bridgeClient.sendCommand(text: command + "\n")
+            try await bridgeClient.sendCommand(text: command + "\n", target: target)
         } catch {
             let message = error.localizedDescription
             terminalBuffer.append(TerminalLine(text: "Command failed: \(message)", type: .error))
@@ -647,7 +636,12 @@ final class RelayService: ObservableObject {
         case .voiceCommand(let cmd):
             // Forward voice command to bridge as PTY input
             Task {
-                try? await sendCommand(cmd.transcribedText)
+                do {
+                    try await sendCommand(cmd.transcribedText, target: cmd.targetId)
+                    sendCommandStatus("Sent: \(cmd.transcribedText)")
+                } catch {
+                    sendCommandStatus("Send failed: \(error.localizedDescription)", isError: true)
+                }
             }
 
         case .voiceAudioCommand(let cmd):
@@ -682,9 +676,12 @@ final class RelayService: ObservableObject {
                 return
             }
 
-            try await sendCommand(text)
+            sendCommandStatus("Heard: \(text)")
+            try await sendCommand(text, target: command.targetId)
+            sendCommandStatus("Sent voice command")
         } catch {
             appendLocalLine(TerminalLine(text: "Watch voice failed: \(error.localizedDescription)", type: .error))
+            sendCommandStatus("Voice failed: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -740,8 +737,13 @@ final class RelayService: ObservableObject {
         scheduleBatchSend()
     }
 
+    private func sendCommandStatus(_ message: String, isError: Bool = false) {
+        sessionManager.send(.commandStatus(WatchMessage.CommandStatus(message: message, isError: isError)))
+    }
+
     private func updateWatchState() {
         let activeTarget = terminalTargets.first(where: { $0.active })
+        let selectedTarget = terminalTargets.first(where: { $0.id == selectedTerminalTarget })
         let state = SessionState(
             connection: connectionState,
             activity: currentActivity,
@@ -752,16 +754,24 @@ final class RelayService: ObservableObject {
             filesChanged: 0,
             linesAdded: 0,
             transportMode: .lan,
-            targetId: activeTarget?.id ?? activeTerminalTarget,
-            targetTitle: activeTarget.map(targetLabel),
-            targetColor: activeTarget?.color
+            targetId: selectedTarget?.id ?? activeTarget?.id ?? activeTerminalTarget,
+            targetTitle: selectedTarget.map(targetLabel) ?? activeTarget.map(targetLabel),
+            targetColor: selectedTarget?.color ?? activeTarget?.color,
+            terminalPages: terminalTargets.map { target in
+                TerminalPage(
+                    id: target.id,
+                    title: targetLabel(target),
+                    color: target.color,
+                    active: target.active
+                )
+            }
         )
 
         sessionManager.updateApplicationContext(with: state)
     }
 
     private func sendTerminalSnapshotToWatch() {
-        let lines = filteredTerminalLines(limit: 15)
+        let lines = terminalBuffer.getLast(50)
         guard !lines.isEmpty else { return }
 
         let update = WatchMessage.TerminalUpdate(lines: lines)
@@ -781,7 +791,7 @@ final class RelayService: ObservableObject {
 
     private func shouldDisplay(_ line: TerminalLine) -> Bool {
         guard let targetId = line.targetId else { return true }
-        return displayedTerminalTargets.isEmpty || displayedTerminalTargets.contains(targetId)
+        return selectedTerminalTarget == nil || selectedTerminalTarget == targetId
     }
 
     private var currentActivity: SessionActivity {

@@ -160,75 +160,33 @@ struct ConnectionStatusView: View {
     }
 
     private var targetPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Menu {
-                ForEach(relayService.terminalTargets) { target in
-                    Button {
-                        relayService.selectTarget(target)
-                    } label: {
-                        Label(targetMenuLabel(target), systemImage: target.active ? "checkmark" : "terminal")
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(activeTargetColor)
-                        .frame(width: 10, height: 10)
-                    Image(systemName: "terminal")
-                        .font(.system(size: 11))
-                    Text(activeTargetLabel)
-                        .font(.system(size: 13, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(Color.subtleText)
-                .padding(.horizontal, 10)
-                .frame(height: 34)
-                .background(activeTargetColor.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(relayService.terminalTargets) { target in
-                        displayChip(for: target)
-                    }
+        Menu {
+            ForEach(relayService.terminalTargets) { target in
+                Button {
+                    relayService.selectTerminalPage(target.id)
+                } label: {
+                    Label(targetMenuLabel(target), systemImage: target.id == relayService.selectedTerminalTarget ? "checkmark" : "terminal")
                 }
             }
-        }
-    }
-
-    private func displayChip(for target: BridgeTarget) -> some View {
-        let isDisplayed = relayService.isTargetDisplayed(target)
-        let color = Color(hex: target.color)
-
-        return Button {
-            relayService.setTargetDisplayed(target, displayed: !isDisplayed)
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Circle()
-                    .fill(color)
-                    .frame(width: 7, height: 7)
-                Text(target.id)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(isDisplayed ? .white : Color.subtleText)
-                if isDisplayed {
-                    Image(systemName: "eye.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
+                    .fill(activeTargetColor)
+                    .frame(width: 10, height: 10)
+                Image(systemName: "terminal")
+                    .font(.system(size: 11))
+                Text(activeTargetLabel)
+                    .font(.system(size: 13, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
             }
-            .padding(.horizontal, 9)
-            .frame(height: 28)
-            .background(isDisplayed ? color.opacity(0.28) : Color.cardBackground)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isDisplayed ? color.opacity(0.75) : Color.fieldBorder, lineWidth: 1)
-            )
+            .foregroundStyle(Color.subtleText)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(activeTargetColor.opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -360,7 +318,7 @@ struct ConnectionStatusView: View {
 
         Task {
             do {
-                try await relayService.sendCommand(command)
+                try await relayService.sendCommand(command, target: relayService.selectedTerminalTarget)
                 commandText = ""
                 showCommandInput = false
             } catch {
@@ -464,24 +422,36 @@ struct ConnectionStatusView: View {
                     .foregroundStyle(Color.subtleText.opacity(0.6))
             }
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(relayService.recentTerminalLines) { line in
-                            terminalLineView(line)
-                                .id(line.id)
-                        }
-                    }
-                    .padding(12)
+            TabView(selection: terminalPageSelection) {
+                ForEach(terminalPages) { page in
+                    terminalPageView(page)
+                        .tag(page.id)
                 }
-                .frame(maxWidth: .infinity)
-                .background(Color.cardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .onChange(of: relayService.recentTerminalLines.count) { _, _ in
-                    if let lastLine = relayService.recentTerminalLines.last {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(lastLine.id, anchor: .bottom)
-                        }
+            }
+            .tabViewStyle(.page(indexDisplayMode: terminalPages.count > 1 ? .always : .never))
+            .frame(maxWidth: .infinity)
+            .frame(height: 260)
+            .background(Color.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func terminalPageView(_ page: TerminalPage) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(lines(for: page.id)) { line in
+                        terminalLineView(line)
+                            .id(line.id)
+                    }
+                }
+                .padding(12)
+                .padding(.bottom, terminalPages.count > 1 ? 18 : 0)
+            }
+            .onChange(of: relayService.recentTerminalLines.count) { _, _ in
+                if let lastLine = lines(for: page.id).last {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(lastLine.id, anchor: .bottom)
                     }
                 }
             }
@@ -542,8 +512,8 @@ struct ConnectionStatusView: View {
     }
 
     private var activeTargetLabel: String {
-        if let active = relayService.terminalTargets.first(where: { $0.active }) {
-            return targetMenuLabel(active)
+        if let selected = selectedTarget {
+            return targetMenuLabel(selected)
         }
         if let target = relayService.activeTerminalTarget {
             return target
@@ -552,10 +522,46 @@ struct ConnectionStatusView: View {
     }
 
     private var activeTargetColor: Color {
-        if let active = relayService.terminalTargets.first(where: { $0.active }) {
-            return Color(hex: active.color)
+        if let selected = selectedTarget {
+            return Color(hex: selected.color)
         }
         return Color.subtleText
+    }
+
+    private var selectedTarget: BridgeTarget? {
+        if let selected = relayService.selectedTerminalTarget,
+           let target = relayService.terminalTargets.first(where: { $0.id == selected }) {
+            return target
+        }
+        return relayService.terminalTargets.first(where: { $0.active })
+    }
+
+    private var terminalPages: [TerminalPage] {
+        let pages = relayService.terminalTargets.map { target in
+            TerminalPage(
+                id: target.id,
+                title: targetMenuLabel(target),
+                color: target.color,
+                active: target.active
+            )
+        }
+        if !pages.isEmpty { return pages }
+        return [TerminalPage(id: relayService.selectedTerminalTarget ?? "terminal", title: "Terminal", color: "666666", active: true)]
+    }
+
+    private var terminalPageSelection: Binding<String> {
+        Binding(
+            get: {
+                relayService.selectedTerminalTarget ?? terminalPages.first?.id ?? "terminal"
+            },
+            set: { targetId in
+                relayService.selectTerminalPage(targetId)
+            }
+        )
+    }
+
+    private func lines(for targetId: String) -> [TerminalLine] {
+        relayService.terminalLines(for: targetId)
     }
 
     private func targetMenuLabel(_ target: BridgeTarget) -> String {

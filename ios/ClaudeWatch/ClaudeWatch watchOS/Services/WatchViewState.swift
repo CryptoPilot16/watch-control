@@ -11,6 +11,7 @@ class WatchViewState: ObservableObject {
     @Published var isStreaming: Bool = false
     @Published var taskCompleteSummary: String? = nil
     @Published var isReachable: Bool = false
+    @Published var selectedTerminalTarget: String?
 
     private let bridge = WatchBridgeClient.shared
     private let sessionManager = WatchSessionManager.shared
@@ -55,6 +56,7 @@ class WatchViewState: ObservableObject {
         case .sessionStateUpdate(let state):
             companionRelayActive = true
             sessionState = state
+            syncSelectedTerminalTarget(with: state)
             isPaired = state.connection != .disconnected
             isReachable = state.connection == .connected
             if isPaired && terminalLines.isEmpty {
@@ -68,6 +70,10 @@ class WatchViewState: ObservableObject {
             for line in update.lines {
                 appendLine(line)
             }
+
+        case .commandStatus(let status):
+            companionRelayActive = true
+            appendLine(TerminalLine(text: status.message, type: status.isError ? .error : .system))
 
         case .approvalRequestMessage(let request):
             companionRelayActive = true
@@ -111,6 +117,32 @@ class WatchViewState: ObservableObject {
                 self.terminalLines.removeFirst(self.terminalLines.count - self.maxLines)
             }
         }
+    }
+
+    var terminalPages: [TerminalPage] {
+        if !sessionState.terminalPages.isEmpty {
+            return sessionState.terminalPages
+        }
+        let fallbackId = selectedTerminalTarget ?? sessionState.targetId ?? "terminal"
+        return [
+            TerminalPage(
+                id: fallbackId,
+                title: sessionState.targetTitle ?? fallbackId,
+                color: sessionState.targetColor ?? "dc2626",
+                active: true
+            )
+        ]
+    }
+
+    func terminalLines(for targetId: String) -> [TerminalLine] {
+        terminalLines
+            .filter { $0.targetId == nil || $0.targetId == targetId }
+            .suffix(30)
+            .map { $0 }
+    }
+
+    func selectTerminalPage(_ targetId: String) {
+        selectedTerminalTarget = targetId
     }
 
     // MARK: - Event stream (SSE from bridge)
@@ -372,29 +404,42 @@ class WatchViewState: ObservableObject {
 
     func sendVoiceCommand(_ text: String) {
         if companionRelayActive {
-            let command = WatchMessage.VoiceCommand(transcribedText: text)
+            let command = WatchMessage.VoiceCommand(transcribedText: text, targetId: selectedTerminalTarget)
             sessionManager.send(.voiceCommand(command))
+            appendLine(TerminalLine(text: "Sent: \(text)", type: .command, targetId: selectedTerminalTarget))
             return
         }
 
-        guard let baseURL = bridge.baseURL, let token = bridge.token else { return }
+        guard let baseURL = bridge.baseURL, let token = bridge.token else {
+            appendLine(TerminalLine(text: "iPhone relay not reachable", type: .error))
+            return
+        }
 
         let url = baseURL.appendingPathComponent("command")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try? JSONEncoder().encode(["command": text + "\n"])
+        var body = ["command": text + "\n"]
+        if let selectedTerminalTarget {
+            body["target"] = selectedTerminalTarget
+        }
+        request.httpBody = try? JSONEncoder().encode(body)
 
         URLSession.shared.dataTask(with: request) { _, _, error in
             if let error { print("[WatchViewState] Command send failed: \(error)") }
         }.resume()
+        appendLine(TerminalLine(text: "Sent: \(text)", type: .command, targetId: selectedTerminalTarget))
     }
 
     func sendAudioCommand(_ audioData: Data) {
-        let command = WatchMessage.VoiceAudioCommand(audioData: audioData)
-        sessionManager.send(.voiceAudioCommand(command))
-        appendLine(TerminalLine(text: "Voice sent to iPhone", type: .system))
+        let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: selectedTerminalTarget)
+        appendLine(TerminalLine(text: "Voice sent to iPhone", type: .system, targetId: selectedTerminalTarget))
+        sessionManager.send(.voiceAudioCommand(command)) { _ in
+            self.appendLine(TerminalLine(text: "iPhone received voice", type: .system, targetId: self.selectedTerminalTarget))
+        } errorHandler: { error in
+            self.appendLine(TerminalLine(text: "Voice send failed: \(error.localizedDescription)", type: .error, targetId: self.selectedTerminalTarget))
+        }
     }
 
     // MARK: - Token rejected (bridge restarted)
@@ -415,6 +460,15 @@ class WatchViewState: ObservableObject {
     private func parseJSON(_ string: String) -> [String: Any]? {
         guard let data = string.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private func syncSelectedTerminalTarget(with state: SessionState) {
+        let validIds = Set(state.terminalPages.map(\.id))
+        if let selectedTerminalTarget,
+           validIds.contains(selectedTerminalTarget) {
+            return
+        }
+        selectedTerminalTarget = state.targetId ?? state.terminalPages.first?.id
     }
 }
 

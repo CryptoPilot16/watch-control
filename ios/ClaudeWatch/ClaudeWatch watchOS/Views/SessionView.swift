@@ -19,7 +19,7 @@ struct SessionView: View {
                 Text("Claude")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(targetColor)
-                if let targetId = session.sessionState.targetId {
+                if let targetId = session.selectedTerminalTarget ?? session.sessionState.targetId {
                     Text(targetId)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundColor(targetColor)
@@ -33,37 +33,13 @@ struct SessionView: View {
             .padding(.horizontal, 4)
             .padding(.bottom, 2)
 
-            // Terminal — use regular VStack (not Lazy) to avoid blank flashes
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        // Only show last 30 lines to keep performance stable
-                        ForEach(visibleLines) { line in
-                            terminalLine(line)
-                                .id(line.id)
-                        }
-
-                        if isThinking {
-                            Text(cursorVisible ? "\u{2588}" : " ")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Theme.Text.primary)
-                                .onReceive(cursorTimer) { _ in cursorVisible.toggle() }
-                                .id("cursor")
-                        }
-                    }
-                    .padding(.horizontal, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .onChange(of: session.terminalLines.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        if isThinking {
-                            proxy.scrollTo("cursor", anchor: .bottom)
-                        } else if let last = visibleLines.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
+            TabView(selection: terminalPageSelection) {
+                ForEach(session.terminalPages) { page in
+                    terminalPage(page)
+                        .tag(page.id)
                 }
             }
+            .tabViewStyle(.page(indexDisplayMode: session.terminalPages.count > 1 ? .always : .never))
 
             commandBar
         }
@@ -132,12 +108,42 @@ struct SessionView: View {
         .padding(.bottom, 4)
     }
 
-    // Only render last 30 lines, skip empty/thinking lines
-    private var visibleLines: [TerminalLine] {
-        session.terminalLines
+    private func terminalPage(_ page: TerminalPage) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(visibleLines(for: page.id)) { line in
+                        terminalLine(line)
+                            .id(line.id)
+                    }
+
+                    if isThinking(on: page.id) {
+                        Text(cursorVisible ? "\u{2588}" : " ")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(hex: page.color))
+                            .onReceive(cursorTimer) { _ in cursorVisible.toggle() }
+                            .id("cursor-\(page.id)")
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.bottom, session.terminalPages.count > 1 ? 16 : 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: session.terminalLines.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    if isThinking(on: page.id) {
+                        proxy.scrollTo("cursor-\(page.id)", anchor: .bottom)
+                    } else if let last = visibleLines(for: page.id).last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private func visibleLines(for targetId: String) -> [TerminalLine] {
+        session.terminalLines(for: targetId)
             .filter { !$0.text.isEmpty || $0.type == .thinking }
-            .suffix(30)
-            .map { $0 } // convert Slice to Array
     }
 
     @ViewBuilder
@@ -150,11 +156,25 @@ struct SessionView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var isThinking: Bool {
-        session.terminalLines.last?.type == .thinking
+    private func isThinking(on targetId: String) -> Bool {
+        visibleLines(for: targetId).last?.type == .thinking
+    }
+
+    private var terminalPageSelection: Binding<String> {
+        Binding(
+            get: {
+                session.selectedTerminalTarget ?? session.terminalPages.first?.id ?? "terminal"
+            },
+            set: { targetId in
+                session.selectTerminalPage(targetId)
+            }
+        )
     }
 
     private var targetColor: Color {
+        if let target = session.terminalPages.first(where: { $0.id == session.selectedTerminalTarget }) {
+            return Color(hex: target.color)
+        }
         if let hex = session.sessionState.targetColor {
             return Color(hex: hex)
         }
