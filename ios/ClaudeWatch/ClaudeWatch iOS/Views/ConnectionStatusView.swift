@@ -160,33 +160,75 @@ struct ConnectionStatusView: View {
     }
 
     private var targetPicker: some View {
-        Menu {
-            ForEach(relayService.terminalTargets) { target in
-                Button {
-                    relayService.selectTarget(target)
-                } label: {
-                    Label(targetMenuLabel(target), systemImage: target.active ? "checkmark" : "terminal")
+        VStack(alignment: .leading, spacing: 8) {
+            Menu {
+                ForEach(relayService.terminalTargets) { target in
+                    Button {
+                        relayService.selectTarget(target)
+                    } label: {
+                        Label(targetMenuLabel(target), systemImage: target.active ? "checkmark" : "terminal")
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(activeTargetColor)
+                        .frame(width: 10, height: 10)
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11))
+                    Text(activeTargetLabel)
+                        .font(.system(size: 13, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(Color.subtleText)
+                .padding(.horizontal, 10)
+                .frame(height: 34)
+                .background(activeTargetColor.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(relayService.terminalTargets) { target in
+                        displayChip(for: target)
+                    }
                 }
             }
+        }
+    }
+
+    private func displayChip(for target: BridgeTarget) -> some View {
+        let isDisplayed = relayService.isTargetDisplayed(target)
+        let color = Color(hex: target.color)
+
+        return Button {
+            relayService.setTargetDisplayed(target, displayed: !isDisplayed)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Circle()
-                    .fill(activeTargetColor)
-                    .frame(width: 10, height: 10)
-                Image(systemName: "terminal")
-                    .font(.system(size: 11))
-                Text(activeTargetLabel)
-                    .font(.system(size: 13, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+                Text(target.id)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(isDisplayed ? .white : Color.subtleText)
+                if isDisplayed {
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
             }
-            .foregroundStyle(Color.subtleText)
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(activeTargetColor.opacity(0.15))
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background(isDisplayed ? color.opacity(0.28) : Color.cardBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isDisplayed ? color.opacity(0.75) : Color.fieldBorder, lineWidth: 1)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)

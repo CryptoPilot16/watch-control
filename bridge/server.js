@@ -42,9 +42,10 @@ const pendingPermissions = new Map();
 const pendingPermissionBodies = new Map();
 let tmuxMirrorTimer = null;
 let tmuxMirrorBusy = false;
-let tmuxMirrorTarget = null;
 let activeCommandTarget = CONFIGURED_COMMAND_TARGET;
-let tmuxMirrorLines = [];
+let tmuxMirrorTarget = activeCommandTarget;
+let tmuxMirrorTargets = new Set(activeCommandTarget ? [activeCommandTarget] : []);
+let tmuxMirrorLinesByTarget = new Map();
 let tmuxMirrorActive = false;
 let tmuxMirrorLastError = null;
 
@@ -152,6 +153,56 @@ async function listAgentTargets() {
     .map((pane, index) => ({ ...pane, color: TARGET_COLORS[index % TARGET_COLORS.length] }));
 }
 
+function syncMirrorTargetsWithTargets(targets) {
+  const validIds = new Set(targets.map((target) => target.id));
+
+  for (const target of [...tmuxMirrorTargets]) {
+    if (!validIds.has(target)) {
+      tmuxMirrorTargets.delete(target);
+      tmuxMirrorLinesByTarget.delete(target);
+    }
+  }
+
+  if (!activeCommandTarget && targets[0]) activeCommandTarget = targets[0].id;
+
+  if (!tmuxMirrorTargets.size) {
+    const fallback =
+      activeCommandTarget && validIds.has(activeCommandTarget)
+        ? activeCommandTarget
+        : targets[0]?.id;
+    if (fallback) tmuxMirrorTargets.add(fallback);
+  }
+
+  if (!tmuxMirrorTarget || !validIds.has(tmuxMirrorTarget)) {
+    tmuxMirrorTarget =
+      activeCommandTarget && validIds.has(activeCommandTarget)
+        ? activeCommandTarget
+        : [...tmuxMirrorTargets][0] || null;
+  }
+
+  const mirroredTargets = [...tmuxMirrorTargets]
+    .filter((target) => validIds.has(target))
+    .slice(0, MAX_AGENT_TARGETS);
+  tmuxMirrorTargets = new Set(mirroredTargets);
+  return mirroredTargets;
+}
+
+function serializeTargets(targets) {
+  const mirrorTargets = new Set(syncMirrorTargetsWithTargets(targets));
+  return targets.map((target) => ({
+    ...target,
+    active: target.id === activeCommandTarget,
+    mirrored: mirrorTargets.has(target.id),
+  }));
+}
+
+async function resolveMirrorTargets() {
+  const targets = await listAgentTargets();
+  const mirrorTargets = syncMirrorTargetsWithTargets(targets);
+  if (!mirrorTargets.length) throw new Error("No Claude/Codex tmux pane available");
+  return mirrorTargets;
+}
+
 async function setActiveCommandTarget(target) {
   const targets = await listAgentTargets();
   const selected = targets.find((item) => item.id === target);
@@ -159,7 +210,11 @@ async function setActiveCommandTarget(target) {
 
   activeCommandTarget = selected.id;
   tmuxMirrorTarget = selected.id;
-  tmuxMirrorLines = [];
+  tmuxMirrorTargets.add(selected.id);
+  if (tmuxMirrorTargets.size > MAX_AGENT_TARGETS) {
+    tmuxMirrorTargets = new Set([...tmuxMirrorTargets].slice(-MAX_AGENT_TARGETS));
+  }
+  tmuxMirrorLinesByTarget.delete(selected.id);
   tmuxMirrorActive = false;
   tmuxMirrorLastError = null;
   log("info", `Active tmux target: ${selected.id}`);
@@ -167,28 +222,37 @@ async function setActiveCommandTarget(target) {
   return selected;
 }
 
+async function setMirroredCommandTargets(targets) {
+  if (!Array.isArray(targets)) throw new Error("targets must be an array");
+
+  const requested = [...new Set(targets)]
+    .filter((target) => typeof target === "string" && target.trim().length > 0)
+    .map((target) => target.trim())
+    .slice(0, MAX_AGENT_TARGETS);
+
+  const agentTargets = await listAgentTargets();
+  const validIds = new Set(agentTargets.map((target) => target.id));
+  const selected = requested.filter((target) => validIds.has(target));
+  if (!selected.length) throw new Error("Select at least one active Claude/Codex pane");
+
+  tmuxMirrorTargets = new Set(selected);
+  for (const target of [...tmuxMirrorLinesByTarget.keys()]) {
+    if (!tmuxMirrorTargets.has(target)) tmuxMirrorLinesByTarget.delete(target);
+  }
+  tmuxMirrorTarget = activeCommandTarget && validIds.has(activeCommandTarget)
+    ? activeCommandTarget
+    : selected[0];
+  if (!activeCommandTarget || !validIds.has(activeCommandTarget)) activeCommandTarget = selected[0];
+  tmuxMirrorActive = false;
+  tmuxMirrorLastError = null;
+  log("info", `Mirroring tmux targets: ${selected.join(", ")}`);
+  scheduleTmuxMirrorRefresh();
+  return serializeTargets(agentTargets);
+}
+
+
 function sendTmuxCommand(target, command) {
   return execFilePromise("tmux", ["send-keys", "-t", target, command, "Enter"]);
-}
-
-async function getTmuxPaneCommand(target) {
-  const command = await execFilePromise("tmux", [
-    "display-message",
-    "-p",
-    "-t",
-    target,
-    "#{pane_current_command}",
-  ]);
-  return command.trim().toLowerCase();
-}
-
-async function resolveMirrorTarget() {
-  const target = await resolveCommandTarget(tmuxMirrorTarget);
-  const command = await getTmuxPaneCommand(target);
-  if (!AGENT_COMMAND_RE.test(command)) {
-    throw new Error(`tmux pane ${target} is running ${command || "nothing"}, not Claude/Codex`);
-  }
-  return target;
 }
 
 function captureTmuxPane(target) {
@@ -239,23 +303,26 @@ async function pollTmuxMirror() {
 
   tmuxMirrorBusy = true;
   try {
-    const target = await resolveMirrorTarget();
-    if (target !== tmuxMirrorTarget) {
-      tmuxMirrorTarget = target;
-      tmuxMirrorLines = [];
-      log("info", `tmux mirror target: ${target}`);
+    const targets = await resolveMirrorTargets();
+    for (const target of targets) {
+      if (target !== tmuxMirrorTarget && activeCommandTarget === target) {
+        tmuxMirrorTarget = target;
+        log("info", `tmux mirror target: ${target}`);
+      }
+
+      const stdout = await captureTmuxPane(target);
+      const nextLines = normalizeTmuxCapture(stdout);
+      const previousLines = tmuxMirrorLinesByTarget.get(target) || [];
+      const newLines = findNewTmuxLines(previousLines, nextLines);
+      tmuxMirrorLinesByTarget.set(target, nextLines);
+
+      if (newLines.length) {
+        pushSseEvent("pty-output", { text: `${newLines.join("\n")}\n`, source: "tmux-mirror", target });
+      }
     }
 
-    const stdout = await captureTmuxPane(target);
-    const nextLines = normalizeTmuxCapture(stdout);
-    const newLines = findNewTmuxLines(tmuxMirrorLines, nextLines);
-    tmuxMirrorLines = nextLines;
-    tmuxMirrorActive = true;
+    tmuxMirrorActive = targets.length > 0;
     tmuxMirrorLastError = null;
-
-    if (newLines.length) {
-      pushSseEvent("pty-output", { text: `${newLines.join("\n")}\n`, source: "tmux-mirror", target });
-    }
   } catch (err) {
     tmuxMirrorActive = false;
     tmuxMirrorLastError = err.message;
@@ -294,16 +361,17 @@ async function pushTmuxSnapshotEvent() {
 
   tmuxMirrorBusy = true;
   try {
-    const target = await resolveMirrorTarget();
-    tmuxMirrorTarget = target;
-    const stdout = await captureTmuxPane(target);
-    const nextLines = normalizeTmuxCapture(stdout);
-    tmuxMirrorLines = nextLines;
-    tmuxMirrorActive = true;
+    const targets = await resolveMirrorTargets();
+    for (const target of targets) {
+      const stdout = await captureTmuxPane(target);
+      const nextLines = normalizeTmuxCapture(stdout);
+      tmuxMirrorLinesByTarget.set(target, nextLines);
+      const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
+      if (!snapshot.length) continue;
+      pushSseEvent("pty-output", { text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target });
+    }
+    tmuxMirrorActive = targets.length > 0;
     tmuxMirrorLastError = null;
-    const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
-    if (!snapshot.length) return;
-    pushSseEvent("pty-output", { text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target });
   } finally {
     tmuxMirrorBusy = false;
   }
@@ -314,20 +382,21 @@ async function sendTmuxSnapshot(client) {
 
   tmuxMirrorBusy = true;
   try {
-    const target = await resolveMirrorTarget();
-    tmuxMirrorTarget = target;
-    const stdout = await captureTmuxPane(target);
-    const nextLines = normalizeTmuxCapture(stdout);
-    tmuxMirrorLines = nextLines;
-    tmuxMirrorActive = true;
-    tmuxMirrorLastError = null;
-    const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
-    if (!snapshot.length) return;
+    const targets = await resolveMirrorTargets();
+    for (const target of targets) {
+      const stdout = await captureTmuxPane(target);
+      const nextLines = normalizeTmuxCapture(stdout);
+      tmuxMirrorLinesByTarget.set(target, nextLines);
+      const snapshot = nextLines.slice(-TMUX_MIRROR_EMIT_LINES);
+      if (!snapshot.length) continue;
 
-    client.write(formatSseMessage({
-      event: "pty-output",
-      data: JSON.stringify({ text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target }),
-    }));
+      client.write(formatSseMessage({
+        event: "pty-output",
+        data: JSON.stringify({ text: `${snapshot.join("\n")}\n`, source: "tmux-snapshot", target }),
+      }));
+    }
+    tmuxMirrorActive = targets.length > 0;
+    tmuxMirrorLastError = null;
   } finally {
     tmuxMirrorBusy = false;
   }
@@ -426,6 +495,7 @@ async function handleCommand(req, res) {
     try {
       target = await resolveCommandTarget(requestedTarget);
       tmuxMirrorTarget = target;
+      tmuxMirrorTargets.add(target);
       await sendTmuxCommand(target, commandText);
       log("info", `Watch command sent to ${target}: ${commandText.slice(0, 120)}`);
       scheduleTmuxMirrorRefresh();
@@ -445,13 +515,10 @@ async function handleTargets(req, res) {
 
   try {
     const targets = await listAgentTargets();
-    if (!activeCommandTarget && targets[0]) activeCommandTarget = targets[0].id;
+    const serializedTargets = serializeTargets(targets);
     return jsonResponse(res, 200, {
       activeTarget: activeCommandTarget,
-      targets: targets.map((target) => ({
-        ...target,
-        active: target.id === activeCommandTarget,
-      })),
+      targets: serializedTargets,
     });
   } catch (err) {
     return jsonResponse(res, 500, { error: err.message });
@@ -473,6 +540,25 @@ async function handleTarget(req, res) {
       tmuxMirrorLastError = err.message;
     });
     return jsonResponse(res, 200, { ok: true, activeTarget: selected.id });
+  } catch (err) {
+    return jsonResponse(res, 400, { error: err.message });
+  }
+}
+
+async function handleMirrorTargets(req, res) {
+  if (req.method !== "POST") return jsonResponse(res, 405, { error: "Method not allowed" });
+  if (!requireAuth(req)) return jsonResponse(res, 401, { error: "Unauthorized" });
+
+  let body;
+  try { body = await readBody(req); } catch { return jsonResponse(res, 400, { error: "Invalid JSON" }); }
+
+  try {
+    const targets = await setMirroredCommandTargets(body.targets);
+    pushTmuxSnapshotEvent().catch((err) => {
+      tmuxMirrorActive = false;
+      tmuxMirrorLastError = err.message;
+    });
+    return jsonResponse(res, 200, { ok: true, activeTarget: activeCommandTarget, targets });
   } catch (err) {
     return jsonResponse(res, 400, { error: err.message });
   }
@@ -594,6 +680,7 @@ function handleStatus(_req, res) {
     terminalMirror: {
       active: tmuxMirrorActive,
       target: tmuxMirrorTarget || CONFIGURED_COMMAND_TARGET || "auto",
+      targets: [...tmuxMirrorTargets],
       intervalMs: TMUX_MIRROR_INTERVAL_MS,
       lastError: tmuxMirrorLastError,
     },
@@ -609,6 +696,7 @@ const routes = {
   "POST /command": handleCommand,
   "GET /targets": handleTargets,
   "POST /target": handleTarget,
+  "POST /mirror-targets": handleMirrorTargets,
   "GET /events": handleEvents,
   "POST /hooks/permission": handleHookPermission,
   "POST /hooks/tool-output": handleHookToolOutput,

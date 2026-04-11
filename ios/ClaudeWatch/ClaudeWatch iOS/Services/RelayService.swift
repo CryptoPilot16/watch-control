@@ -26,6 +26,7 @@ final class RelayService: ObservableObject {
     @Published private(set) var lastConnected: Date?
     @Published private(set) var terminalTargets: [BridgeTarget] = []
     @Published private(set) var activeTerminalTarget: String?
+    @Published private(set) var displayedTerminalTargets: Set<String> = []
 
     // Permission prompt state
     @Published var pendingPermission: PendingPermission? = nil
@@ -135,6 +136,7 @@ final class RelayService: ObservableObject {
         connectionState = .disconnected
         terminalTargets = []
         activeTerminalTarget = nil
+        displayedTerminalTargets = []
 
         UserDefaults.standard.removeObject(forKey: "paired_machine_name")
         UserDefaults.standard.removeObject(forKey: "last_connected")
@@ -221,6 +223,15 @@ final class RelayService: ObservableObject {
             let response = try await bridgeClient.fetchTargets()
             terminalTargets = response.targets
             activeTerminalTarget = response.activeTarget
+            let mirroredTargets = response.targets
+                .filter { $0.mirrored == true }
+                .map(\.id)
+            if !mirroredTargets.isEmpty {
+                displayedTerminalTargets = Set(mirroredTargets)
+            } else if let activeTarget = response.activeTarget {
+                displayedTerminalTargets = [activeTarget]
+            }
+            refreshRecentTerminalLines()
             updateWatchState()
         } catch {
             print("[RelayService] Failed to refresh targets: \(error)")
@@ -234,14 +245,48 @@ final class RelayService: ObservableObject {
                 await refreshTargets()
                 let line = TerminalLine(text: "Switched to \(targetLabel(target))", type: .system)
                 terminalBuffer.append(line)
-                recentTerminalLines = terminalBuffer.getLast(15)
+                refreshRecentTerminalLines()
                 pendingTerminalLines.append(line)
                 scheduleBatchSend()
                 reconnectStream()
             } catch {
                 let line = TerminalLine(text: "Target switch failed: \(error.localizedDescription)", type: .error)
                 terminalBuffer.append(line)
-                recentTerminalLines = terminalBuffer.getLast(15)
+                refreshRecentTerminalLines()
+            }
+        }
+    }
+
+    func isTargetDisplayed(_ target: BridgeTarget) -> Bool {
+        if !displayedTerminalTargets.isEmpty {
+            return displayedTerminalTargets.contains(target.id)
+        }
+        return target.mirrored == true
+    }
+
+    func setTargetDisplayed(_ target: BridgeTarget, displayed: Bool) {
+        var targetIds = displayedTerminalTargets
+        if targetIds.isEmpty {
+            targetIds = Set(terminalTargets.filter { $0.mirrored == true }.map(\.id))
+        }
+        if displayed {
+            targetIds.insert(target.id)
+        } else {
+            guard targetIds.count > 1 else { return }
+            targetIds.remove(target.id)
+        }
+        displayedTerminalTargets = targetIds
+        refreshRecentTerminalLines()
+
+        Task {
+            do {
+                try await bridgeClient.selectMirrorTargets(Array(targetIds))
+                await refreshTargets()
+                refreshRecentTerminalLines()
+            } catch {
+                let line = TerminalLine(text: "Display change failed: \(error.localizedDescription)", type: .error)
+                terminalBuffer.append(line)
+                refreshRecentTerminalLines()
             }
         }
     }
@@ -303,14 +348,16 @@ final class RelayService: ObservableObject {
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-            .map { TerminalLine(text: $0, type: .output, colorHex: colorHex) }
+            .map { TerminalLine(text: $0, type: .output, colorHex: colorHex, targetId: target) }
         guard !lines.isEmpty else { return }
 
         for line in lines {
             terminalBuffer.append(line)
-            pendingTerminalLines.append(line)
+            if shouldDisplay(line) {
+                pendingTerminalLines.append(line)
+            }
         }
-        recentTerminalLines = terminalBuffer.getLast(15)
+        refreshRecentTerminalLines()
 
         scheduleBatchSend()
     }
@@ -359,7 +406,7 @@ final class RelayService: ObservableObject {
         // Add to terminal as well
         let line = TerminalLine(text: "⚠ Permission: \(description)", type: .system)
         terminalBuffer.append(line)
-        recentTerminalLines = terminalBuffer.getLast(15)
+        refreshRecentTerminalLines()
 
         // Forward to watch. The watch response uses ApprovalRequest.id, so keep
         // a local mapping back to the bridge's permissionId.
@@ -393,7 +440,7 @@ final class RelayService: ObservableObject {
             type: approved ? .output : .error
         )
         terminalBuffer.append(line)
-        recentTerminalLines = terminalBuffer.getLast(15)
+        refreshRecentTerminalLines()
         pendingPermission = nil
     }
 
@@ -409,7 +456,7 @@ final class RelayService: ObservableObject {
                 await MainActor.run {
                     let line = TerminalLine(text: "✓ Approved (all session)", type: .output)
                     self.terminalBuffer.append(line)
-                    self.recentTerminalLines = self.terminalBuffer.getLast(15)
+                    self.refreshRecentTerminalLines()
                     self.pendingPermission = nil
                 }
             } catch {
@@ -434,7 +481,7 @@ final class RelayService: ObservableObject {
                         type: allow ? .output : .error
                     )
                     self.terminalBuffer.append(line)
-                    self.recentTerminalLines = self.terminalBuffer.getLast(15)
+                    self.refreshRecentTerminalLines()
                     self.pendingPermission = nil
                 }
             } catch {
@@ -454,7 +501,7 @@ final class RelayService: ObservableObject {
         } catch {
             let message = error.localizedDescription
             terminalBuffer.append(TerminalLine(text: "Command failed: \(message)", type: .error))
-            recentTerminalLines = terminalBuffer.getLast(15)
+            refreshRecentTerminalLines()
             throw error
         }
     }
@@ -556,14 +603,14 @@ final class RelayService: ObservableObject {
             terminalBuffer.append(line)
             pendingTerminalLines.append(line)
         }
-        recentTerminalLines = terminalBuffer.getLast(10)
+        refreshRecentTerminalLines(limit: 10)
         scheduleBatchSend()
     }
 
     private func handleTaskComplete(_ data: String) {
         let line = TerminalLine(text: "Task completed", type: .system)
         terminalBuffer.append(line)
-        recentTerminalLines = terminalBuffer.getLast(15)
+        refreshRecentTerminalLines()
         notificationService.postTaskComplete()
         updateWatchState()
     }
@@ -573,13 +620,13 @@ final class RelayService: ObservableObject {
         let errorMsg = json["error"] as? String ?? "Unknown error"
         let line = TerminalLine(text: errorMsg, type: .error)
         terminalBuffer.append(line)
-        recentTerminalLines = terminalBuffer.getLast(15)
+        refreshRecentTerminalLines()
     }
 
     private func handleStop(_ data: String) {
         let line = TerminalLine(text: "Session stopped", type: .system)
         terminalBuffer.append(line)
-        recentTerminalLines = terminalBuffer.getLast(15)
+        refreshRecentTerminalLines()
         updateWatchState()
     }
 
@@ -640,11 +687,27 @@ final class RelayService: ObservableObject {
     }
 
     private func sendTerminalSnapshotToWatch() {
-        let lines = terminalBuffer.getLast(15)
+        let lines = filteredTerminalLines(limit: 15)
         guard !lines.isEmpty else { return }
 
         let update = WatchMessage.TerminalUpdate(lines: lines)
         sessionManager.send(.terminalUpdate(update))
+    }
+
+    private func refreshRecentTerminalLines(limit: Int = 15) {
+        recentTerminalLines = filteredTerminalLines(limit: limit)
+    }
+
+    private func filteredTerminalLines(limit: Int) -> [TerminalLine] {
+        let lines = terminalBuffer.getAll()
+        let filtered = lines.filter(shouldDisplay)
+        guard limit < filtered.count else { return filtered }
+        return Array(filtered.suffix(limit))
+    }
+
+    private func shouldDisplay(_ line: TerminalLine) -> Bool {
+        guard let targetId = line.targetId else { return true }
+        return displayedTerminalTargets.isEmpty || displayedTerminalTargets.contains(targetId)
     }
 
     private var currentActivity: SessionActivity {

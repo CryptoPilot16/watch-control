@@ -280,13 +280,14 @@ class WatchViewState: ObservableObject {
         case "pty-output":
             // Raw PTY output — show it
             if let text = json["text"] as? String {
+                let target = json["target"] as? String
                 let cleaned = text.replacingOccurrences(
                     of: "\\x1B\\[[0-9;]*[a-zA-Z]",
                     with: "",
                     options: .regularExpression
                 ).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !cleaned.isEmpty {
-                    appendLine(TerminalLine(text: String(cleaned.prefix(80)), type: .output))
+                    appendLine(TerminalLine(text: String(cleaned.prefix(80)), type: .output, targetId: target))
                 }
             }
 

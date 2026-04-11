@@ -7,6 +7,7 @@ struct BridgeTarget: Identifiable, Decodable, Equatable {
     let title: String
     let color: String
     let active: Bool
+    let mirrored: Bool?
 }
 
 struct BridgeTargetsResponse: Decodable {
@@ -137,6 +138,10 @@ final class BridgeClient {
 
     func selectTarget(_ target: String) async throws {
         try await authenticatedPost(path: "target", body: ["target": target])
+    }
+
+    func selectMirrorTargets(_ targets: [String]) async throws {
+        try await authenticatedPostRaw(path: "mirror-targets", body: ["targets": targets])
     }
 
     /// Responds to an approval request.

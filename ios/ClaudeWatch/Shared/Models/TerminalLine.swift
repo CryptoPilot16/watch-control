@@ -6,6 +6,7 @@ struct TerminalLine: Identifiable, Codable, Equatable {
     let timestamp: Date
     let type: LineType
     let colorHex: String?
+    let targetId: String?
 
     enum LineType: String, Codable {
         case output      // Claude's output
@@ -15,11 +16,12 @@ struct TerminalLine: Identifiable, Codable, Equatable {
         case error       // Error messages
     }
 
-    init(text: String, type: LineType = .output, colorHex: String? = nil) {
+    init(text: String, type: LineType = .output, colorHex: String? = nil, targetId: String? = nil) {
         self.id = UUID()
         self.text = text
         self.timestamp = Date()
         self.type = type
         self.colorHex = colorHex
+        self.targetId = targetId
     }
 }
