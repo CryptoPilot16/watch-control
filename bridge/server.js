@@ -363,8 +363,9 @@ async function setMirroredCommandTargets(targets) {
 }
 
 
-function sendTmuxCommand(target, command) {
-  return execFilePromise("tmux", ["send-keys", "-t", target, command, "Enter"]);
+async function sendTmuxCommand(target, command) {
+  await execFilePromise("tmux", ["send-keys", "-t", target, "-l", "--", command]);
+  return execFilePromise("tmux", ["send-keys", "-t", target, "Enter"]);
 }
 
 function captureTmuxPane(target) {

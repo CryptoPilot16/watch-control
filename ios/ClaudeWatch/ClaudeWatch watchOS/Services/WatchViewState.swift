@@ -436,7 +436,9 @@ class WatchViewState: ObservableObject {
         let target = currentTerminalTarget
         if companionRelayActive {
             let command = WatchMessage.VoiceCommand(transcribedText: text, targetId: target)
-            sessionManager.send(.voiceCommand(command))
+            sessionManager.sendRealtime(.voiceCommand(command), errorHandler: { error in
+                self.setRelayStatus(error.localizedDescription, isError: true, targetId: target)
+            })
             return
         }
 
@@ -464,8 +466,8 @@ class WatchViewState: ObservableObject {
     func sendAudioCommand(_ audioData: Data) {
         let target = currentTerminalTarget
         let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: target)
-        sessionManager.send(.voiceAudioCommand(command), errorHandler: { error in
-            self.appendLine(TerminalLine(text: "Voice send failed: \(error.localizedDescription)", type: .error, targetId: target))
+        sessionManager.sendRealtime(.voiceAudioCommand(command), errorHandler: { error in
+            self.setRelayStatus(error.localizedDescription, isError: true, targetId: target)
         })
     }
 

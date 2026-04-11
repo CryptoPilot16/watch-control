@@ -83,6 +83,27 @@ final class WatchSessionManager: NSObject, ObservableObject {
         }
     }
 
+    /// Sends a message only when the counterpart is reachable right now.
+    /// Use this for command input so stale voice/text commands are not replayed
+    /// minutes later after the user's terminal context has changed.
+    func sendRealtime(
+        _ message: WatchMessage,
+        replyHandler: (([String: Any]) -> Void)? = nil,
+        errorHandler: ((Error) -> Void)? = nil
+    ) {
+        guard let session else {
+            errorHandler?(WatchSessionError.sessionNotSupported)
+            return
+        }
+
+        guard session.isReachable else {
+            errorHandler?(WatchSessionError.counterpartNotReachable)
+            return
+        }
+
+        session.sendMessage(message.toDictionary(), replyHandler: replyHandler, errorHandler: errorHandler)
+    }
+
     /// Updates the application context with the current connection state.
     /// Application context is delivered lazily -- only the most recent value
     /// is kept, which makes it ideal for connection/session state.
@@ -117,11 +138,14 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     enum WatchSessionError: LocalizedError {
         case sessionNotSupported
+        case counterpartNotReachable
 
         var errorDescription: String? {
             switch self {
             case .sessionNotSupported:
                 return "WCSession is not supported on this device."
+            case .counterpartNotReachable:
+                return "Open the iPhone app to send commands from Apple Watch."
             }
         }
     }
