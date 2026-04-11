@@ -105,6 +105,19 @@ struct SessionView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
+
+                Button {
+                    sendCommand()
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.black)
+                        .frame(width: 34, height: 34)
+                        .background(canSendTypedCommand ? targetColor : Theme.Text.dimmed)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSendTypedCommand)
             }
 
             if let statusText = commandStatusText {
@@ -113,21 +126,6 @@ struct SessionView: View {
                     .foregroundColor(commandError == nil ? Theme.Text.secondary : Theme.Accent.error)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-            }
-
-            if !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button {
-                    sendCommand()
-                } label: {
-                    Text("Send")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.black)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 30)
-                        .background(targetColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 6)
@@ -171,6 +169,10 @@ struct SessionView: View {
             return "Listening... tap stop to send"
         }
         return nil
+    }
+
+    private var canSendTypedCommand: Bool {
+        !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func toggleRecording() {
