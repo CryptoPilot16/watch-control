@@ -20,6 +20,14 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- The bridge serves plain HTTP over Tailscale/LAN. Pairing code and
+		     bearer token auth protect app requests, so the watch target allows
+		     cleartext connections just like the iOS companion. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>watch-control needs microphone access to transcribe your voice commands.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
