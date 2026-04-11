@@ -23,6 +23,7 @@ class WatchViewState: ObservableObject {
     private var lastEventId: Int = 0
     private var sseTask: URLSessionDataTask?
     private var companionRelayActive = false
+    private var hasReceivedDirectEventData = false
     private var relayStatusTargetId: String?
     private var seenTerminalLineIds = Set<UUID>()
 
@@ -62,7 +63,6 @@ class WatchViewState: ObservableObject {
         switch message {
         case .sessionStateUpdate(let state):
             companionRelayActive = true
-            stopEventStream()
             sessionState = state
             syncSelectedTerminalTarget(with: state)
             isPaired = state.connection != .disconnected
@@ -73,9 +73,11 @@ class WatchViewState: ObservableObject {
 
         case .terminalUpdate(let update):
             companionRelayActive = true
-            stopEventStream()
             isPaired = true
             isReachable = true
+            if bridge.isPaired && sseTask != nil && hasReceivedDirectEventData {
+                break
+            }
             for line in update.lines {
                 appendLine(line)
             }
@@ -86,11 +88,13 @@ class WatchViewState: ObservableObject {
 
         case .bridgeCredentials(let credentials):
             companionRelayActive = true
-            stopEventStream()
             if let url = URL(string: credentials.baseURL) {
                 bridge.setCredentials(baseURL: url, token: credentials.token)
                 isPaired = true
                 isReachable = true
+                if sseTask == nil {
+                    startEventStream()
+                }
             }
 
         case .pasteResponse(let response):
@@ -111,7 +115,6 @@ class WatchViewState: ObservableObject {
 
         case .connectionStatus(let status):
             companionRelayActive = true
-            stopEventStream()
             sessionState.connection = status.state
             sessionState.machineName = status.machineName
             isPaired = status.state != .disconnected
@@ -140,6 +143,13 @@ class WatchViewState: ObservableObject {
 
     func appendLine(_ line: TerminalLine) {
         DispatchQueue.main.async {
+            if let last = self.terminalLines.last,
+               last.text == line.text,
+               last.type == line.type,
+               last.targetId == line.targetId,
+               last.colorHex == line.colorHex {
+                return
+            }
             guard self.seenTerminalLineIds.insert(line.id).inserted else { return }
             self.terminalLines.append(line)
             if self.terminalLines.count > self.maxLines {
@@ -204,7 +214,9 @@ class WatchViewState: ObservableObject {
 
     func startEventStream() {
         guard shouldUseDirectEventStream else { return }
+        guard sseTask == nil else { return }
         guard let baseURL = bridge.baseURL, let token = bridge.token else { return }
+        hasReceivedDirectEventData = false
 
         let url = baseURL.appendingPathComponent("events")
         var request = URLRequest(url: url)
@@ -230,15 +242,18 @@ class WatchViewState: ObservableObject {
     func stopEventStream() {
         sseTask?.cancel()
         sseTask = nil
+        hasReceivedDirectEventData = false
     }
 
     var shouldUseDirectEventStream: Bool {
-        isPaired && !companionRelayActive
+        bridge.isPaired
     }
 
     // MARK: - SSE parsing
 
     func handleSSEData(_ text: String) {
+        hasReceivedDirectEventData = true
+
         // Parse SSE format: "id: N\nevent: type\ndata: json\n\n"
         let blocks = text.components(separatedBy: "\n\n").filter { !$0.isEmpty }
 
@@ -392,6 +407,30 @@ class WatchViewState: ObservableObject {
 
     /// Respond with a specific option label (for AskUserQuestion)
     func respondToPermissionWithOption(_ optionLabel: String) {
+        if let permissionId = UserDefaults.standard.string(forKey: "watch_pending_permission"),
+           let baseURL = bridge.baseURL, let token = bridge.token {
+            pendingApproval = nil
+
+            let url = baseURL.appendingPathComponent("command")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            // For AskUserQuestion, we send "allow" with the selected option
+            let body: [String: Any] = [
+                "permissionId": permissionId,
+                "decision": ["behavior": "allow"],
+                "selectedOption": optionLabel
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+            URLSession.shared.dataTask(with: request).resume()
+            appendLine(TerminalLine(text: "→ \(optionLabel)", type: .command))
+            UserDefaults.standard.removeObject(forKey: "watch_pending_permission")
+            return
+        }
+
         if companionRelayActive, let requestId = pendingApproval?.id {
             pendingApproval = nil
             let deniedLabels = ["no", "deny", "denied"]
@@ -399,65 +438,41 @@ class WatchViewState: ObservableObject {
             let response = WatchMessage.ApprovalResponse(requestId: requestId, approved: approved)
             sessionManager.send(.approvalResponse(response))
             appendLine(TerminalLine(text: "-> \(optionLabel)", type: .command))
-            return
         }
-
-        guard let permissionId = UserDefaults.standard.string(forKey: "watch_pending_permission"),
-              let baseURL = bridge.baseURL, let token = bridge.token else { return }
-
-        pendingApproval = nil
-
-        let url = baseURL.appendingPathComponent("command")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        // For AskUserQuestion, we send "allow" with the selected option
-        let body: [String: Any] = [
-            "permissionId": permissionId,
-            "decision": ["behavior": "allow"],
-            "selectedOption": optionLabel
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        URLSession.shared.dataTask(with: request).resume()
-        appendLine(TerminalLine(text: "→ \(optionLabel)", type: .command))
-        UserDefaults.standard.removeObject(forKey: "watch_pending_permission")
     }
 
     func respondToPermission(approved: Bool) {
+        if let permissionId = UserDefaults.standard.string(forKey: "watch_pending_permission"),
+           let baseURL = bridge.baseURL, let token = bridge.token {
+            pendingApproval = nil
+
+            let url = baseURL.appendingPathComponent("command")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let body: [String: Any] = [
+                "permissionId": permissionId,
+                "decision": ["behavior": approved ? "allow" : "deny"]
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+            URLSession.shared.dataTask(with: request) { _, _, error in
+                if let error { print("[WatchViewState] Permission response failed: \(error)") }
+            }.resume()
+
+            appendLine(TerminalLine(text: approved ? "✓ Approved" : "✗ Denied", type: approved ? .output : .error))
+            UserDefaults.standard.removeObject(forKey: "watch_pending_permission")
+            return
+        }
+
         if companionRelayActive, let requestId = pendingApproval?.id {
             pendingApproval = nil
             let response = WatchMessage.ApprovalResponse(requestId: requestId, approved: approved)
             sessionManager.send(.approvalResponse(response))
             appendLine(TerminalLine(text: approved ? "Approved" : "Denied", type: approved ? .output : .error))
-            return
         }
-
-        guard let permissionId = UserDefaults.standard.string(forKey: "watch_pending_permission"),
-              let baseURL = bridge.baseURL, let token = bridge.token else { return }
-
-        pendingApproval = nil
-
-        let url = baseURL.appendingPathComponent("command")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let body: [String: Any] = [
-            "permissionId": permissionId,
-            "decision": ["behavior": approved ? "allow" : "deny"]
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        URLSession.shared.dataTask(with: request) { _, _, error in
-            if let error { print("[WatchViewState] Permission response failed: \(error)") }
-        }.resume()
-
-        appendLine(TerminalLine(text: approved ? "✓ Approved" : "✗ Denied", type: approved ? .output : .error))
-        UserDefaults.standard.removeObject(forKey: "watch_pending_permission")
     }
 
     // MARK: - Voice command (direct to bridge)
@@ -519,7 +534,7 @@ class WatchViewState: ObservableObject {
     }
 
     private var currentTerminalTarget: String? {
-        selectedTerminalTarget ?? sessionState.targetId ?? sessionState.terminalPages.first?.id
+        selectedTerminalTarget ?? sessionState.targetId ?? sessionState.terminalPages.first?.id ?? terminalPages.first?.id
     }
 
     private func sendTextViaIPhoneRelay(_ text: String, target: String?, fallbackError: Error? = nil) {
@@ -537,7 +552,7 @@ class WatchViewState: ObservableObject {
 
     private func sendAudioViaIPhoneRelay(_ audioData: Data, target: String?, fallbackError: Error? = nil) {
         let command = WatchMessage.VoiceAudioCommand(audioData: audioData, targetId: target)
-        sessionManager.sendRealtime(.voiceAudioCommand(command), errorHandler: { error in
+        sessionManager.send(.voiceAudioCommand(command), errorHandler: { error in
             DispatchQueue.main.async {
                 self.setRelayStatus(
                     fallbackError?.localizedDescription ?? error.localizedDescription,
@@ -546,20 +561,28 @@ class WatchViewState: ObservableObject {
                 )
             }
         })
+        setRelayStatus("Sent voice to iPhone relay", isError: false, targetId: target)
     }
 
     private func setRelayStatus(_ text: String, isError: Bool, targetId: String?) {
         relayStatusText = text
         relayStatusIsError = isError
-        relayStatusTargetId = targetId
+        relayStatusTargetId = targetId ?? currentTerminalTarget
 
         guard !isError else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-            guard self?.relayStatusText == text,
-                  self?.relayStatusTargetId == targetId else { return }
-            self?.relayStatusText = nil
-            self?.relayStatusTargetId = nil
+            guard let self else { return }
+            let resolvedTarget = targetId ?? self.currentTerminalTarget
+            guard self.relayStatusText == text,
+                  self.relayStatusTargetId == resolvedTarget else { return }
+            self.relayStatusText = nil
+            self.relayStatusTargetId = nil
         }
+    }
+
+    fileprivate func handleSSECompletion() {
+        sseTask = nil
+        hasReceivedDirectEventData = false
     }
 }
 
@@ -591,6 +614,10 @@ private class SSEDelegate: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
             print("[SSE] Connection lost: \(error.localizedDescription)")
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.owner?.handleSSECompletion()
         }
 
         // Check if it was a 401 (already handled above)
