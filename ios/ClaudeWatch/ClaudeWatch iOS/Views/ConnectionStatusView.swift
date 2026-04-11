@@ -51,6 +51,14 @@ struct ConnectionStatusView: View {
             withAnimation(.easeInOut(duration: 0.3)) {
                 showBackgroundBanner = (newPhase == .inactive)
             }
+            // When iOS suspends the app, the SSE URLSession can be silently
+            // killed without firing didCompleteWithError until much later.
+            // Force a fresh stream as soon as the app returns to the
+            // foreground so the terminal panel keeps receiving events
+            // instead of going stale.
+            if newPhase == .active {
+                relayService.reconnectStream()
+            }
         }
     }
 

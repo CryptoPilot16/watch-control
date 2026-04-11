@@ -180,12 +180,17 @@ final class RelayService: ObservableObject {
                 case .disconnected:
                     self?.connectionState = .disconnected
                     self?.updateWatchState()
-                case .polling:
-                    // Still considered connected, just degraded
-                    break
                 }
             }
         }
+    }
+
+    /// Force the SSE stream to reconnect. Called from the foreground transition
+    /// in `ConnectionStatusView` so the terminal panel recovers immediately
+    /// when the app comes back from being suspended by iOS.
+    func reconnectStream() {
+        guard isPaired else { return }
+        sseClient.reconnectNow()
     }
 
     private func handleBridgeEvent(_ event: SSEClient.SSEEvent) {

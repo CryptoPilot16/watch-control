@@ -1,8 +1,8 @@
 import Foundation
 
 /// Server-Sent Events client that connects to the bridge `/events` endpoint.
-/// Supports automatic reconnection with `Last-Event-ID`, heartbeat timeout
-/// detection, and fallback to polling when SSE fails repeatedly.
+/// Supports automatic reconnection with `Last-Event-ID` and heartbeat timeout
+/// detection. Reconnects indefinitely with exponential backoff (1s → 30s).
 final class SSEClient {
 
     // MARK: - Types
@@ -17,15 +17,13 @@ final class SSEClient {
         case disconnected
         case connecting
         case connected
-        case polling
     }
 
     // MARK: - Configuration
 
     private let heartbeatTimeout: TimeInterval = 15.0
-    private let maxSSEFailures = 3
-    private let sseFailureWindow: TimeInterval = 30.0
-    private let pollingInterval: TimeInterval = 2.0
+    private let initialBackoff: TimeInterval = 1.0
+    private let maxBackoff: TimeInterval = 30.0
 
     // MARK: - Callbacks
 
@@ -49,10 +47,11 @@ final class SSEClient {
     private var urlSession: URLSession?
     private var dataTask: URLSessionDataTask?
     private var heartbeatTimer: Timer?
-    private var pollingTimer: Timer?
 
-    // Failure tracking for SSE -> polling fallback
-    private var sseFailures: [Date] = []
+    /// Current backoff delay for the next reconnect attempt. Doubles on each
+    /// consecutive failure and resets to `initialBackoff` after a successful
+    /// connection.
+    private var currentBackoff: TimeInterval = 1.0
 
     // Buffer for parsing SSE lines
     private var lineBuffer = ""
@@ -68,13 +67,22 @@ final class SSEClient {
     func connect(baseURL: URL, token: String) {
         self.baseURL = baseURL
         self.token = token
+        currentBackoff = initialBackoff
         startSSE()
     }
 
     func disconnect() {
         stopSSE()
-        stopPolling()
         state = .disconnected
+    }
+
+    /// Force a fresh SSE connection. Safe to call repeatedly — typically used
+    /// from the foreground transition to recover from an iOS-suspended session
+    /// without waiting for the heartbeat watchdog.
+    func reconnectNow() {
+        guard baseURL != nil, token != nil else { return }
+        currentBackoff = initialBackoff
+        startSSE()
     }
 
     // MARK: - SSE Connection
@@ -139,88 +147,28 @@ final class SSEClient {
     }
 
     private func handleHeartbeatTimeout() {
-        // No data received within the heartbeat window -- reconnect
-        recordSSEFailure()
-        reconnectOrFallback()
+        // No data (not even a `:heartbeat` comment) within the watchdog window:
+        // the connection is dead even if URLSession hasn't noticed yet.
+        scheduleReconnect()
     }
 
-    // MARK: - Failure tracking & fallback
+    // MARK: - Reconnect with exponential backoff
 
-    private func recordSSEFailure() {
-        let now = Date()
-        sseFailures.append(now)
-        // Prune old failures outside the window
-        sseFailures = sseFailures.filter { now.timeIntervalSince($0) < sseFailureWindow }
-    }
-
-    private func shouldFallbackToPolling() -> Bool {
-        let now = Date()
-        let recentFailures = sseFailures.filter { now.timeIntervalSince($0) < sseFailureWindow }
-        return recentFailures.count >= maxSSEFailures
-    }
-
-    private func reconnectOrFallback() {
+    private func scheduleReconnect() {
         stopSSE()
+        let delay = currentBackoff
+        currentBackoff = min(currentBackoff * 2, maxBackoff)
 
-        if shouldFallbackToPolling() {
-            startPolling()
-        } else {
-            // Reconnect SSE after a brief delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.startSSE()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.baseURL != nil, self.token != nil else { return }
+            self.startSSE()
         }
-    }
-
-    // MARK: - Polling fallback
-
-    private func startPolling() {
-        stopPolling()
-        state = .polling
-
-        pollingTimer = Timer.scheduledTimer(
-            withTimeInterval: pollingInterval,
-            repeats: true
-        ) { [weak self] _ in
-            self?.poll()
-        }
-        // Immediate first poll
-        poll()
-    }
-
-    private func stopPolling() {
-        pollingTimer?.invalidate()
-        pollingTimer = nil
-    }
-
-    private func poll() {
-        guard let baseURL, let token else { return }
-
-        let statusURL = baseURL.appendingPathComponent("status")
-        var request = URLRequest(url: statusURL)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 5
-
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-            guard let self, error == nil, let data else { return }
-
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let event = SSEEvent(
-                    id: nil,
-                    event: "poll-status",
-                    data: String(data: data, encoding: .utf8) ?? "{}"
-                )
-                DispatchQueue.main.async {
-                    self.onEvent?(event)
-                }
-            }
-        }
-        task.resume()
     }
 
     // MARK: - SSE Parsing
 
     fileprivate func handleSSEConnected() {
+        currentBackoff = initialBackoff
         DispatchQueue.main.async {
             self.state = .connected
         }
@@ -297,13 +245,12 @@ final class SSEClient {
     }
 
     fileprivate func handleSSEError(_ error: Error?) {
-        recordSSEFailure()
-        reconnectOrFallback()
+        scheduleReconnect()
     }
 
     fileprivate func handleSSEComplete() {
-        // Stream ended gracefully -- reconnect
-        reconnectOrFallback()
+        // Stream ended gracefully -- reconnect.
+        scheduleReconnect()
     }
 }
 
