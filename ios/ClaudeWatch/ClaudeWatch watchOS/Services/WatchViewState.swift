@@ -83,7 +83,7 @@ class WatchViewState: ObservableObject {
             isPaired = status.state != .disconnected
             isReachable = status.state == .connected
 
-        case .voiceCommand, .approvalResponse:
+        case .voiceCommand, .voiceAudioCommand, .approvalResponse:
             break
         }
     }
@@ -389,6 +389,12 @@ class WatchViewState: ObservableObject {
         URLSession.shared.dataTask(with: request) { _, _, error in
             if let error { print("[WatchViewState] Command send failed: \(error)") }
         }.resume()
+    }
+
+    func sendAudioCommand(_ audioData: Data) {
+        let command = WatchMessage.VoiceAudioCommand(audioData: audioData)
+        sessionManager.send(.voiceAudioCommand(command))
+        appendLine(TerminalLine(text: "Voice sent to iPhone", type: .system))
     }
 
     // MARK: - Token rejected (bridge restarted)

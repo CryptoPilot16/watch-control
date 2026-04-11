@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Speech
 
 /// Coordinates communication between the bridge server, SSE event stream,
 /// and the Apple Watch via WCSession.
@@ -50,6 +51,7 @@ final class RelayService: ObservableObject {
     private let terminalBuffer = OutputRingBuffer<TerminalLine>(capacity: 50)
     private var terminalBatchTimer: Timer?
     private var pendingTerminalLines: [TerminalLine] = []
+    private var watchAudioRecognitionTask: SFSpeechRecognitionTask?
 
     private var elapsedTimer: Timer?
     private var sessionStartDate: Date?
@@ -648,6 +650,11 @@ final class RelayService: ObservableObject {
                 try? await sendCommand(cmd.transcribedText)
             }
 
+        case .voiceAudioCommand(let cmd):
+            Task {
+                await handleWatchAudioCommand(cmd)
+            }
+
         case .approvalResponse(let response):
             // Forward approval response to bridge
             let key = "pending_permission_\(response.requestId.uuidString)"
@@ -664,6 +671,73 @@ final class RelayService: ObservableObject {
         default:
             break
         }
+    }
+
+    private func handleWatchAudioCommand(_ command: WatchMessage.VoiceAudioCommand) async {
+        do {
+            let text = try await transcribeWatchAudio(command.audioData)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                appendLocalLine(TerminalLine(text: "Watch voice was empty", type: .system))
+                return
+            }
+
+            try await sendCommand(text)
+        } catch {
+            appendLocalLine(TerminalLine(text: "Watch voice failed: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    private func transcribeWatchAudio(_ audioData: Data) async throws -> String {
+        guard await requestSpeechPermission() else {
+            throw BridgeClient.BridgeError.serverError("Speech recognition permission is needed.")
+        }
+
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+              recognizer.isAvailable else {
+            throw BridgeClient.BridgeError.serverError("Speech recognition is not available right now.")
+        }
+
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("watch-command-\(UUID().uuidString).m4a")
+        try audioData.write(to: audioURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        let request = SFSpeechURLRecognitionRequest(url: audioURL)
+        request.shouldReportPartialResults = false
+
+        return try await withCheckedThrowingContinuation { continuation in
+            var didResume = false
+            watchAudioRecognitionTask?.cancel()
+            watchAudioRecognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                guard !didResume else { return }
+                if let error {
+                    didResume = true
+                    Task { @MainActor in self?.watchAudioRecognitionTask = nil }
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let result, result.isFinal else { return }
+                didResume = true
+                Task { @MainActor in self?.watchAudioRecognitionTask = nil }
+                continuation.resume(returning: result.bestTranscription.formattedString)
+            }
+        }
+    }
+
+    private func requestSpeechPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    private func appendLocalLine(_ line: TerminalLine) {
+        terminalBuffer.append(line)
+        pendingTerminalLines.append(line)
+        refreshRecentTerminalLines()
+        scheduleBatchSend()
     }
 
     private func updateWatchState() {

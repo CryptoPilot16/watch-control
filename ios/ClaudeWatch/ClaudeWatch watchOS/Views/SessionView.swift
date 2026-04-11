@@ -1,12 +1,13 @@
 import SwiftUI
 import WatchKit
+import AVFoundation
 
 struct SessionView: View {
     @EnvironmentObject private var session: WatchViewState
+    @StateObject private var audioRecorder = WatchAudioRecorder()
 
     @State private var commandText = ""
     @State private var commandError: String?
-    @State private var isDictating = false
     @State private var cursorVisible = true
     private let cursorTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
@@ -70,6 +71,9 @@ struct SessionView: View {
         .sheet(item: $session.pendingApproval) { request in
             ApprovalView(request: request)
         }
+        .onDisappear {
+            audioRecorder.cancel()
+        }
     }
 
     private var commandBar: some View {
@@ -91,23 +95,22 @@ struct SessionView: View {
                     }
 
                 Button {
-                    startDictation()
+                    toggleRecording()
                 } label: {
-                    Image(systemName: isDictating ? "stop.fill" : "mic.fill")
+                    Image(systemName: audioRecorder.isRecording ? "stop.fill" : "mic.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.black)
                         .frame(width: 34, height: 34)
-                        .background(isDictating ? Theme.Accent.error : targetColor)
+                        .background(audioRecorder.isRecording ? Theme.Accent.error : targetColor)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-                .disabled(isDictating)
             }
 
-            if let commandError {
-                Text(commandError)
+            if let statusText = commandStatusText {
+                Text(statusText)
                     .font(.system(size: 10))
-                    .foregroundColor(Theme.Accent.error)
+                    .foregroundColor(commandError == nil ? Theme.Text.secondary : Theme.Accent.error)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
             }
@@ -160,28 +163,31 @@ struct SessionView: View {
         return Theme.Text.primary
     }
 
-    private func startDictation() {
-        guard !isDictating else { return }
-        guard let controller = WKExtension.shared().visibleInterfaceController else {
-            commandError = "Could not open dictation"
-            return
+    private var commandStatusText: String? {
+        if let commandError {
+            return commandError
         }
+        if audioRecorder.isRecording {
+            return "Listening... tap stop to send"
+        }
+        return nil
+    }
 
+    private func toggleRecording() {
         commandError = nil
-        isDictating = true
-        controller.presentTextInputController(
-            withSuggestions: nil,
-            allowedInputMode: .plain
-        ) { results in
-            DispatchQueue.main.async {
-                isDictating = false
-
-                guard let text = results?.compactMap({ $0 as? String }).first?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                    !text.isEmpty
-                else { return }
-
-                commandText = text
+        if audioRecorder.isRecording {
+            guard let audioData = audioRecorder.stop() else {
+                commandError = audioRecorder.error ?? "Could not capture audio"
+                return
+            }
+            HapticManager.commandSent()
+            session.sendAudioCommand(audioData)
+        } else {
+            Task {
+                let started = await audioRecorder.start()
+                if !started {
+                    commandError = audioRecorder.error ?? "Could not start microphone"
+                }
             }
         }
     }
@@ -217,6 +223,94 @@ struct SessionView: View {
         case .system:   return Theme.Text.secondary
         case .thinking: return Theme.Text.primary.opacity(0.5)
         case .error:    return Theme.Accent.error
+        }
+    }
+}
+
+@MainActor
+private final class WatchAudioRecorder: NSObject, ObservableObject {
+    @Published private(set) var isRecording = false
+    @Published private(set) var error: String?
+
+    private var recorder: AVAudioRecorder?
+    private var recordingURL: URL?
+
+    func start() async -> Bool {
+        guard !isRecording else { return true }
+        error = nil
+
+        guard await requestMicrophonePermission() else {
+            error = "Microphone permission is needed."
+            return false
+        }
+
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.record, mode: .measurement)
+            try audioSession.setActive(true)
+
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("watch-command-\(UUID().uuidString).m4a")
+            let settings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 16_000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+            ]
+
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            recorder.prepareToRecord()
+            guard recorder.record() else {
+                error = "Could not start recording."
+                return false
+            }
+
+            self.recorder = recorder
+            recordingURL = url
+            isRecording = true
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            cancel()
+            return false
+        }
+    }
+
+    func stop() -> Data? {
+        guard isRecording, let recorder, let recordingURL else { return nil }
+        recorder.stop()
+        isRecording = false
+        self.recorder = nil
+        self.recordingURL = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+        do {
+            let data = try Data(contentsOf: recordingURL)
+            try? FileManager.default.removeItem(at: recordingURL)
+            return data
+        } catch {
+            self.error = error.localizedDescription
+            try? FileManager.default.removeItem(at: recordingURL)
+            return nil
+        }
+    }
+
+    func cancel() {
+        recorder?.stop()
+        recorder = nil
+        isRecording = false
+        if let recordingURL {
+            try? FileManager.default.removeItem(at: recordingURL)
+        }
+        recordingURL = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func requestMicrophonePermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                continuation.resume(returning: allowed)
+            }
         }
     }
 }

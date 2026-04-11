@@ -9,6 +9,7 @@ enum WatchMessage: Codable {
 
     // Watch -> iPhone
     case voiceCommand(VoiceCommand)
+    case voiceAudioCommand(VoiceAudioCommand)
     case approvalResponse(ApprovalResponse)
 
     // iPhone -> Watch
@@ -27,6 +28,18 @@ enum WatchMessage: Codable {
         init(transcribedText: String) {
             self.id = UUID()
             self.transcribedText = transcribedText
+            self.timestamp = Date()
+        }
+    }
+
+    struct VoiceAudioCommand: Codable {
+        let id: UUID
+        let audioData: Data
+        let timestamp: Date
+
+        init(audioData: Data) {
+            self.id = UUID()
+            self.audioData = audioData
             self.timestamp = Date()
         }
     }
@@ -73,6 +86,7 @@ enum WatchMessage: Codable {
     private var typeIdentifier: String {
         switch self {
         case .voiceCommand:           return "voiceCommand"
+        case .voiceAudioCommand:      return "voiceAudioCommand"
         case .approvalResponse:       return "approvalResponse"
         case .terminalUpdate:         return "terminalUpdate"
         case .approvalRequestMessage: return "approvalRequestMessage"
@@ -118,6 +132,8 @@ enum WatchMessage: Codable {
         switch self {
         case .voiceCommand(let cmd):
             try container.encode(cmd, forKey: .payload)
+        case .voiceAudioCommand(let cmd):
+            try container.encode(cmd, forKey: .payload)
         case .approvalResponse(let resp):
             try container.encode(resp, forKey: .payload)
         case .terminalUpdate(let update):
@@ -138,6 +154,8 @@ enum WatchMessage: Codable {
         switch type {
         case "voiceCommand":
             self = .voiceCommand(try container.decode(VoiceCommand.self, forKey: .payload))
+        case "voiceAudioCommand":
+            self = .voiceAudioCommand(try container.decode(VoiceAudioCommand.self, forKey: .payload))
         case "approvalResponse":
             self = .approvalResponse(try container.decode(ApprovalResponse.self, forKey: .payload))
         case "terminalUpdate":
