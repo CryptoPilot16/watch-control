@@ -15,26 +15,25 @@ struct SessionView: View {
     private let cursorTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             // Top bar
-            HStack(spacing: 4) {
-                ClaudeMascot(size: 14)
+            HStack(spacing: 3) {
+                ClaudeMascot(size: 11)
                 Text("Claude")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundColor(targetColor)
                 if let targetId = session.selectedTerminalTarget ?? session.sessionState.targetId {
                     Text(targetId)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: 8, design: .monospaced))
                         .foregroundColor(targetColor)
                         .lineLimit(1)
                 }
                 Spacer()
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 5, height: 5)
+                    .frame(width: 4, height: 4)
             }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 2)
+            .padding(.horizontal, 3)
 
             TabView(selection: terminalPageSelection) {
                 ForEach(session.terminalPages) { page in
@@ -64,17 +63,17 @@ struct SessionView: View {
     }
 
     private var commandBar: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 6) {
+        VStack(spacing: 2) {
+            HStack(spacing: 4) {
                 Circle()
                     .fill(targetColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 6, height: 6)
                 TextField("Type or speak", text: $commandText)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(targetColor)
                     .textFieldStyle(.plain)
-                    .padding(.horizontal, 8)
-                    .frame(height: 34)
+                    .padding(.horizontal, 6)
+                    .frame(height: 30)
                     .background(Theme.Background.overlay)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .onSubmit {
@@ -92,15 +91,15 @@ struct SessionView: View {
                     .multilineTextAlignment(.center)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 4)
+        .padding(.bottom, 2)
     }
 
     private var actionButton: some View {
         Image(systemName: actionButtonIcon)
             .font(.system(size: 13, weight: .semibold))
             .foregroundColor(.black)
-            .frame(width: 34, height: 34)
+            .frame(width: 30, height: 30)
             .background(actionButtonColor)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
@@ -133,7 +132,7 @@ struct SessionView: View {
                     }
                 }
                 .padding(.horizontal, 4)
-                .padding(.bottom, session.terminalPages.count > 1 ? 16 : 0)
+                .padding(.bottom, session.terminalPages.count > 1 ? 8 : 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: session.terminalLines.count) { _, _ in
