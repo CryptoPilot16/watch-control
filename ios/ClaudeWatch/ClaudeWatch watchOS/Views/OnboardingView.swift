@@ -5,7 +5,7 @@ struct OnboardingView: View {
     @StateObject private var bridge = WatchBridgeClient.shared
 
     @State private var code = ""
-    @State private var ipAddress = ""
+    @State private var ipAddress = UserDefaults.standard.string(forKey: "bridge_host") ?? "100.78.114.85"
     @State private var isConnecting = false
     @State private var error: String?
     @State private var bridgeURL: URL?
@@ -22,22 +22,12 @@ struct OnboardingView: View {
                         .foregroundColor(Theme.Text.primary)
                 }
 
-                Text("Bridge IP")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.Text.secondary)
-
-                TextField("100.x.x.x", text: $ipAddress)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.Text.primary)
-                    .multilineTextAlignment(.center)
-                    .focused($ipFocused)
-
                 Text("Pair code")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.Text.secondary)
 
                 TextField("000000", text: $code)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .foregroundColor(Theme.Text.primary)
                     .multilineTextAlignment(.center)
                     .textContentType(.oneTimeCode)
@@ -46,6 +36,11 @@ struct OnboardingView: View {
                         let filtered = String(newValue.filter { $0.isNumber }.prefix(6))
                         if filtered != newValue { code = filtered }
                     }
+
+                Text("IP \(ipAddress)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Theme.Text.secondary)
+                    .lineLimit(1)
 
                 Button { submitCode(code) } label: {
                     Text("Pair")
@@ -65,6 +60,12 @@ struct OnboardingView: View {
                         .scaleEffect(0.7)
                 }
 
+                TextField("Edit IP", text: $ipAddress)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.Text.primary)
+                    .multilineTextAlignment(.center)
+                    .focused($ipFocused)
+
                 if let error {
                     Text(error)
                         .font(.system(size: 10))
@@ -79,9 +80,7 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.Background.primary)
         .onAppear {
-            if let saved = UserDefaults.standard.string(forKey: "bridge_host"), !saved.isEmpty {
-                ipAddress = saved
-            }
+            codeFocused = true
         }
     }
 
